@@ -1,0 +1,5 @@
+﻿fecha,prediccion_ia,etiqueta_real,confianza_pct,correcto
+2026-08-10 01:21:45,Pizza,Pizza,96.57,Sí
+2026-08-10 01:24:44,Hamburguesa,Hamburguesa,94.65,Sí
+2026-08-10 01:26:37,Ensalada,Ensalada,98.66,Sí
+2026-08-10 01:27:57,Pechuga de pollo,Pechuga de pollo,68.82,Sí
