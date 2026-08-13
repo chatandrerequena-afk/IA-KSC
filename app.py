@@ -9,6 +9,7 @@ import hashlib
 import secrets as pysecrets
 import sqlite3
 import threading
+import textwrap
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
@@ -1146,21 +1147,23 @@ def hero(p=None):
     extra=""
     if p:
         pts,lvl,_=level_info(p["id"]);r=streak(p["id"])
-        extra=f"""
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;position:relative;z-index:1">
-          <span class="chip">👋 Hola, {p['name']}</span>
-          <span class="chip">{lvl[2]} {lvl[1]}</span>
-          <span class="chip">🏆 {pts} pts</span>
-          <span class="chip">🔥 {r} día{'s' if r!=1 else ''} de racha</span>
-        </div>"""
-    st.markdown(f"""
-    <div class="hero">
-      <span class="badge">● EUREKA 2026 · NUTRIVISION</span>
-      <div class="hero-title">IA <span class="green">KSC</span></div>
-      <div class="hero-sub">Diario de comidas, perfiles, retos, puntos, recetas, planes, cámara, progreso y laboratorio Eureka.</div>
-      {extra}
-    </div>
-    """,unsafe_allow_html=True)
+        extra=(
+            '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;position:relative;z-index:1">'
+            f'<span class="chip">👋 Hola, {p["name"]}</span>'
+            f'<span class="chip">{lvl[2]} {lvl[1]}</span>'
+            f'<span class="chip">🏆 {pts} pts</span>'
+            f'<span class="chip">🔥 {r} día{"s" if r!=1 else ""} de racha</span>'
+            '</div>'
+        )
+    st.markdown(
+        '<div class="hero">'
+        '<span class="badge">● EUREKA 2026 · NUTRIVISION</span>'
+        '<div class="hero-title">IA <span class="green">KSC</span></div>'
+        '<div class="hero-sub">Diario de comidas, perfiles, retos, puntos, recetas, planes, cámara, progreso y laboratorio Eureka.</div>'
+        f'{extra}'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
 def section(k,t,s):
     st.markdown(f'<div class="kicker">{k.upper()}</div><div style="font-size:2.05rem;font-weight:950;color:white">{t}</div><div class="note">{s}</div><br>',unsafe_allow_html=True)
@@ -1252,7 +1255,7 @@ if page=="🏠 Dashboard":
         if water==0:st.markdown('<div class="water-alert"><b>💧 Falta registrar agua hoy.</b> El control diario de agua forma parte obligatoria del dashboard.</div>',unsafe_allow_html=True)
 
         wpct=min(100,round(water/goal*100)) if goal else 0
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div class="stat-grid">
           <div class="stat-card accent-orange" style="animation-delay:.02s">
             <span class="icon">🔥</span>
@@ -1282,7 +1285,7 @@ if page=="🏠 Dashboard":
             </div>
           </div>
         </div>
-        """,unsafe_allow_html=True)
+        """),unsafe_allow_html=True)
         show_metrics(total)
         st.markdown("### 🤖 ¿Qué puedo comer ahora?")
         hour=datetime.now().hour
@@ -1651,12 +1654,12 @@ elif page=="🧪 Eureka Lab":
     con=db();df=pd.read_sql_query("""SELECT pt.*,p.name profile_name FROM plate_tests pt LEFT JOIN profiles p ON p.id=pt.profile_id ORDER BY pt.id""",con);con.close()
     if df.empty:st.warning("Aún no hay pruebas.")
     else:
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
           <div class="stat-card accent-green"><span class="icon">🧪</span><div class="label">Pruebas</div><div class="value">{len(df)}</div></div>
           <div class="stat-card accent-blue"><span class="icon">🎯</span><div class="label">Precisión</div><div class="value">{df['correct'].mean()*100:.1f}%</div></div>
           <div class="stat-card accent-purple"><span class="icon">📊</span><div class="label">Confianza</div><div class="value">{df['avg_conf'].mean():.1f}%</div></div>
-        </div>""",unsafe_allow_html=True)
+        </div>"""),unsafe_allow_html=True)
         ver=df.groupby("app_version",dropna=False).agg(pruebas=("id","count"),precision=("correct","mean"),confianza=("avg_conf","mean")).reset_index();ver["precision"]*=100
         st.markdown("### Versiones");st.dataframe(ver,hide_index=True,use_container_width=True)
         pred=df["predicted_foods"].fillna("").str.split(",").str[0].str.strip();actual=df["actual_foods"].fillna("").str.split(",").str[0].str.strip()
@@ -1692,12 +1695,12 @@ elif page=="🎓 Aprende":
 elif page=="⚙️ Configuración":
     section("SISTEMA","Configuración","Claves y módulos.")
     ok=bool(ai_key())
-    st.markdown(f"""
+    st.markdown(textwrap.dedent(f"""
     <div class="stat-card {'accent-green' if ok else 'accent-orange'}" style="max-width:420px">
       <span class="icon">{'✅' if ok else '⚠️'}</span>
       <div class="label">Estado de IA KSC</div>
       <div class="value" style="font-size:1.1rem">{'GROQ_API_KEY encontrada' if ok else 'Falta GROQ_API_KEY'}</div>
-    </div>""",unsafe_allow_html=True)
+    </div>"""),unsafe_allow_html=True)
     st.code('GROQ_API_KEY = "TU_TOKEN"\n# opcional:\nUSDA_API_KEY = "TU_CLAVE_USDA"',language="toml")
     if st.button("Probar IA",type="primary"):
         try:
