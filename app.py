@@ -287,6 +287,77 @@ div[data-testid="stVerticalBlockBorderWrapper"]:hover{transform:translateY(-2px)
 
 footer{visibility:hidden}
 #MainMenu{visibility:hidden}
+
+/* --- Desbloqueos tipo grid de logros --- */
+.unlock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:8px}
+.unlock-card{
+ border-radius:16px;padding:14px;text-align:center;border:1px solid var(--line);
+ background:rgba(255,255,255,.02);transition:all .3s var(--ease);animation:popIn .45s var(--ease) both;
+}
+.unlock-card.open{
+ background:linear-gradient(160deg,rgba(86,240,159,.14),rgba(86,240,159,.02));
+ border-color:rgba(86,240,159,.35);
+}
+.unlock-card.open:hover{transform:translateY(-4px) scale(1.02);box-shadow:0 14px 34px rgba(86,240,159,.14)}
+.unlock-card.closed{opacity:.55;filter:grayscale(.35)}
+.unlock-card .uicon{font-size:1.8rem;display:block;margin-bottom:6px}
+.unlock-card .uname{font-size:.86rem;font-weight:800;color:white}
+.unlock-card .ureq{font-size:.72rem;color:var(--muted);margin-top:3px}
+
+/* --- Banner de ganador --- */
+.winner-banner{
+ padding:20px 24px;border-radius:20px;text-align:center;margin:10px 0;
+ background:linear-gradient(120deg,rgba(255,209,102,.16),rgba(86,240,159,.08));
+ border:1px solid rgba(255,209,102,.35);animation:popIn .5s var(--ease) both;
+}
+.winner-banner .wtitle{font-size:1.5rem;font-weight:950;color:#ffe4a3}
+
+/* --- Avatar circular de perfil --- */
+.avatar-ring{
+ width:86px;height:86px;border-radius:99px;display:flex;align-items:center;justify-content:center;
+ background:linear-gradient(135deg,var(--green2),var(--blue));font-weight:950;font-size:1.7rem;color:#04140c;
+ box-shadow:0 8px 26px rgba(86,240,159,.25);margin:0 auto 10px;
+ border:3px solid rgba(255,255,255,.12);
+}
+.avatar-photo{
+ width:86px;height:86px;border-radius:99px;object-fit:cover;display:block;margin:0 auto 10px;
+ border:3px solid rgba(86,240,159,.35);box-shadow:0 8px 26px rgba(0,0,0,.3);
+}
+
+/* --- Fila de ranking con medallas --- */
+.rank-row{
+ display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:14px;margin-bottom:6px;
+ background:rgba(255,255,255,.025);border:1px solid var(--line);transition:transform .2s var(--ease);
+}
+.rank-row:hover{transform:translateX(3px)}
+.rank-row.top1{background:linear-gradient(90deg,rgba(255,209,102,.14),transparent);border-color:rgba(255,209,102,.3)}
+.rank-row.top2{background:linear-gradient(90deg,rgba(200,210,220,.12),transparent);border-color:rgba(200,210,220,.25)}
+.rank-row.top3{background:linear-gradient(90deg,rgba(255,157,92,.12),transparent);border-color:rgba(255,157,92,.25)}
+.rank-pos{font-weight:950;font-size:1.05rem;min-width:28px}
+.rank-name{flex:1;font-weight:700}
+.rank-val{font-weight:900;color:var(--green)}
+
+/* --- Sidebar: tarjeta de perfil activo --- */
+.side-profile{
+ padding:14px;border-radius:16px;background:rgba(86,240,159,.06);
+ border:1px solid rgba(86,240,159,.18);text-align:center;margin-bottom:10px;
+ animation:fadeInUp .4s var(--ease) both;
+}
+.side-avatar{
+ width:52px;height:52px;border-radius:99px;margin:0 auto 8px;object-fit:cover;
+ border:2px solid rgba(86,240,159,.4);
+}
+.side-avatar-fallback{
+ width:52px;height:52px;border-radius:99px;margin:0 auto 8px;
+ background:linear-gradient(135deg,var(--green2),var(--blue));
+ display:flex;align-items:center;justify-content:center;font-weight:900;color:#04140c;
+}
+.brand-row{display:flex;align-items:center;gap:10px;margin-bottom:2px}
+.brand-icon{
+ width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+ background:linear-gradient(135deg,var(--green2),var(--blue));font-size:1.15rem;
+ animation:floatSoft 3.6s ease-in-out infinite;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1071,17 +1142,35 @@ def render_pushup_camera(cid,pid):
 # UI
 # ============================================================
 
-def hero():
-    st.markdown("""
+def hero(p=None):
+    extra=""
+    if p:
+        pts,lvl,_=level_info(p["id"]);r=streak(p["id"])
+        extra=f"""
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;position:relative;z-index:1">
+          <span class="chip">👋 Hola, {p['name']}</span>
+          <span class="chip">{lvl[2]} {lvl[1]}</span>
+          <span class="chip">🏆 {pts} pts</span>
+          <span class="chip">🔥 {r} día{'s' if r!=1 else ''} de racha</span>
+        </div>"""
+    st.markdown(f"""
     <div class="hero">
       <span class="badge">● EUREKA 2026 · NUTRIVISION</span>
       <div class="hero-title">IA <span class="green">KSC</span></div>
       <div class="hero-sub">Diario de comidas, perfiles, retos, puntos, recetas, planes, cámara, progreso y laboratorio Eureka.</div>
+      {extra}
     </div>
     """,unsafe_allow_html=True)
 
 def section(k,t,s):
     st.markdown(f'<div class="kicker">{k.upper()}</div><div style="font-size:2.05rem;font-weight:950;color:white">{t}</div><div class="note">{s}</div><br>',unsafe_allow_html=True)
+
+def profile_photo_b64(path):
+    try:
+        raw=Path(path).read_bytes()
+        return "data:image/jpeg;base64,"+base64.b64encode(raw).decode()
+    except Exception:
+        return None
 
 def profile_selector():
     ps=list_profiles()
@@ -1095,13 +1184,23 @@ def profile_selector():
     key=f"unlocked_{pid}"
     if not p.get("pin_hash"):st.session_state[key]=True
     if not st.session_state.get(key):
+        st.sidebar.markdown(f'<div class="side-profile"><div class="side-avatar-fallback">🔒</div><b>{p["name"]}</b><div class="note" style="margin-top:2px">Perfil bloqueado</div></div>',unsafe_allow_html=True)
         pin=st.sidebar.text_input("PIN",type="password",max_chars=4,key=f"pin_{pid}")
-        if st.sidebar.button("Desbloquear",use_container_width=True):
+        if st.sidebar.button("🔓 Desbloquear",use_container_width=True,type="primary"):
             if verify_pin(pin,p["pin_hash"]):st.session_state[key]=True;st.rerun()
             else:st.sidebar.error("PIN incorrecto.")
         return None
-    st.sidebar.markdown(f"**{p['name']}**")
-    st.sidebar.markdown(f'<span class="chip">{p["goal"]}</span>',unsafe_allow_html=True)
+    photo=p.get("photo_path")
+    b64=profile_photo_b64(photo) if photo and Path(photo).exists() else None
+    avatar_html=f'<img src="{b64}" class="side-avatar">' if b64 else f'<div class="side-avatar-fallback">{p["name"][:1].upper()}</div>'
+    r=streak(p["id"])
+    st.sidebar.markdown(f"""
+    <div class="side-profile">
+      {avatar_html}
+      <b>{p['name']}</b>
+      <div style="margin-top:6px"><span class="chip">{p['goal']}</span></div>
+      <div class="note" style="margin-top:4px">🔥 {r} día{'s' if r!=1 else ''} de racha</div>
+    </div>""",unsafe_allow_html=True)
     if st.sidebar.button("🔒 Bloquear",use_container_width=True):st.session_state[key]=False;st.rerun()
     return p
 
@@ -1115,8 +1214,8 @@ def need_profile(p):
 # ============================================================
 
 with st.sidebar:
-    st.markdown("## 🥗 IA KSC")
-    st.caption("NutriVision · V5.1")
+    st.markdown('<div class="brand-row"><div class="brand-icon">🥗</div><div style="font-size:1.3rem;font-weight:950;color:white;letter-spacing:-.03em">IA KSC</div></div>',unsafe_allow_html=True)
+    st.caption(f"NutriVision · V{APP_VERSION}")
     st.markdown("---")
     page=st.radio("Menú",[
         "🏠 Dashboard",
@@ -1138,7 +1237,7 @@ with st.sidebar:
     st.markdown("---")
     profile=profile_selector()
 
-hero()
+hero(profile)
 
 # ============================================================
 # DASHBOARD
@@ -1232,7 +1331,9 @@ elif page=="👤 Perfiles":
     with t2:
         if not profile:st.info("Desbloquea un perfil.")
         else:
-            if profile.get("photo_path") and Path(profile["photo_path"]).exists():st.image(profile["photo_path"],width=160)
+            b64=profile_photo_b64(profile["photo_path"]) if profile.get("photo_path") and Path(profile["photo_path"]).exists() else None
+            if b64:st.markdown(f'<img src="{b64}" class="avatar-photo" style="width:120px;height:120px">',unsafe_allow_html=True)
+            else:st.markdown(f'<div class="avatar-ring" style="width:120px;height:120px;font-size:2.2rem">{profile["name"][:1].upper()}</div>',unsafe_allow_html=True)
             with st.form("editp"):
                 c1,c2=st.columns(2)
                 with c1:
@@ -1450,9 +1551,20 @@ elif page=="🏆 KSC Game":
         st.markdown(f'<div class="streak-card"><span class="streak-flame">🔥</span><div><div class="streak-days">{r}</div><div class="streak-label">día{"s" if r!=1 else ""} seguidos</div></div></div>',unsafe_allow_html=True)
     if nxt:st.progress((pts-lvl[0])/(nxt[0]-lvl[0]));st.caption(f"Faltan {nxt[0]-pts} puntos para {nxt[2]} {nxt[1]}")
     st.markdown("### 🔓 Desbloqueos")
+    cards=""
     for need,name in [(100,"🧃 Laboratorio de batidos"),(250,"🍰 Chef de postres"),(500,"📅 Planificador Maestro"),(900,"👑 Leyenda"),(1500,"💎 Elite")]:
-        st.write("✅" if pts>=need else "🔒",name,f"· {need} puntos")
-    rank=leaderboard();rank.insert(0,"Posición",range(1,len(rank)+1));st.dataframe(rank,hide_index=True,use_container_width=True)
+        icon,label=name.split(" ",1);opened=pts>=need
+        cards+=f'<div class="unlock-card {"open" if opened else "closed"}"><span class="uicon">{icon if opened else "🔒"}</span><div class="uname">{label}</div><div class="ureq">{need} puntos</div></div>'
+    st.markdown(f'<div class="unlock-grid">{cards}</div>',unsafe_allow_html=True)
+    st.markdown("### 🏅 Ranking general")
+    rank=leaderboard()
+    medals={0:"🥇",1:"🥈",2:"🥉"}
+    rows=""
+    for i,row in rank.iterrows():
+        cls=f"top{i+1}" if i<3 else ""
+        pos=medals.get(i,f"#{i+1}")
+        rows+=f'<div class="rank-row {cls}"><div class="rank-pos">{pos}</div><div class="rank-name">{row["name"]}</div><div class="rank-val">{int(row["points"])} pts</div></div>'
+    st.markdown(rows if rows else '<div class="note">Aún no hay puntajes.</div>',unsafe_allow_html=True)
 
 # ============================================================
 # PUSH-UP
@@ -1480,10 +1592,18 @@ elif page=="💪 Push-Up Arena":
         ats=attempts(c["id"])
         if len(ats)>=2:
             order=sorted(ats,key=lambda x:x["reps"],reverse=True)
-            st.markdown("## 🤝 Empate" if order[0]["reps"]==order[1]["reps"] else f"## 🏆 Ganador: {order[0]['name']} · {order[0]['reps']} push-ups")
+            if order[0]["reps"]==order[1]["reps"]:
+                st.markdown('<div class="winner-banner"><div class="wtitle">🤝 Empate</div></div>',unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="winner-banner"><span class="streak-flame" style="font-size:2rem">🏆</span><div class="wtitle">{order[0]["name"]}</div><div class="note">{order[0]["reps"]} push-ups en el minuto</div></div>',unsafe_allow_html=True)
             for a in ats:
                 if a.get("video_path") and Path(a["video_path"]).exists():st.video(a["video_path"])
-    st.markdown("### Ranking Push-Up");st.dataframe(pushup_ranking(),hide_index=True,use_container_width=True)
+    st.markdown("### 🏅 Ranking Push-Up")
+    pr=pushup_ranking();medals={0:"🥇",1:"🥈",2:"🥉"};rows=""
+    for i,row in pr.iterrows():
+        cls=f"top{i+1}" if i<3 else "";pos=medals.get(i,f"#{i+1}")
+        rows+=f'<div class="rank-row {cls}"><div class="rank-pos">{pos}</div><div class="rank-name">{row["name"]}</div><div class="rank-val">{int(row["mejor_marca"])} reps</div></div>'
+    st.markdown(rows if rows else '<div class="note">Sin intentos aún.</div>',unsafe_allow_html=True)
 
 # ============================================================
 # PROGRESO
@@ -1493,14 +1613,24 @@ elif page=="📈 Progreso":
     need_profile(profile);section("PROGRESO","Peso y medidas","7, 30 o 90 días; tendencias, no diagnósticos.")
     t1,t2=st.tabs(["⚖️ Peso","📏 Medidas"])
     with t1:
-        e=energy_estimate(profile);st.metric("Peso actual",f"{profile['weight_kg']:.1f} kg")
-        if e.get("enabled"):st.caption(f"Mantenimiento aprox. {e['maintenance']} kcal/día · rango {e['target_low']}–{e['target_high']}")
-        else:st.info(e.get("reason"))
+        e=energy_estimate(profile);logs=weights(profile["id"])
+        delta=None
+        if len(logs)>=2:delta=logs[-1]["weight_kg"]-logs[0]["weight_kg"]
+        d1,d2=st.columns(2)
+        with d1:
+            arrow="▲" if delta and delta>0 else "▼" if delta and delta<0 else "▬"
+            dcolor="var(--orange)" if delta and delta>0 else "var(--green)" if delta and delta<0 else "var(--muted)"
+            sub=f'<span style="color:{dcolor}">{arrow} {abs(delta):.1f} kg en el periodo</span>' if delta is not None else "Sin variación registrada aún"
+            st.markdown(f'<div class="stat-card accent-green"><span class="icon">⚖️</span><div class="label">Peso actual</div><div class="value">{profile["weight_kg"]:.1f} kg</div><div class="sub">{sub}</div></div>',unsafe_allow_html=True)
+        with d2:
+            if e.get("enabled"):
+                st.markdown(f'<div class="stat-card accent-blue"><span class="icon">🔥</span><div class="label">Mantenimiento</div><div class="value">{e["maintenance"]} kcal</div><div class="sub">rango {e["target_low"]}–{e["target_high"]} kcal/día</div></div>',unsafe_allow_html=True)
+            else:
+                st.info(e.get("reason"))
         with st.form("wform"):
             c1,c2,c3=st.columns(3);d=c1.date_input("Fecha",date.today());w=c2.number_input("Peso",30.,250.,float(profile["weight_kg"]),.1);wa=c3.number_input("Cintura opcional",0.,250.,0.,.5)
             note=st.text_input("Nota");save=st.form_submit_button("Guardar",type="primary")
         if save:add_weight(profile["id"],d,w,wa or None,note);st.rerun()
-        logs=weights(profile["id"])
         if logs:
             df=pd.DataFrame(logs);df["log_date"]=pd.to_datetime(df["log_date"]);st.line_chart(df.set_index("log_date")[["weight_kg"]]);st.dataframe(df,hide_index=True,use_container_width=True)
     with t2:
@@ -1521,7 +1651,12 @@ elif page=="🧪 Eureka Lab":
     con=db();df=pd.read_sql_query("""SELECT pt.*,p.name profile_name FROM plate_tests pt LEFT JOIN profiles p ON p.id=pt.profile_id ORDER BY pt.id""",con);con.close()
     if df.empty:st.warning("Aún no hay pruebas.")
     else:
-        a,b,c=st.columns(3);a.metric("Pruebas",len(df));b.metric("Precisión",f"{df['correct'].mean()*100:.1f}%");c.metric("Confianza",f"{df['avg_conf'].mean():.1f}%")
+        st.markdown(f"""
+        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="stat-card accent-green"><span class="icon">🧪</span><div class="label">Pruebas</div><div class="value">{len(df)}</div></div>
+          <div class="stat-card accent-blue"><span class="icon">🎯</span><div class="label">Precisión</div><div class="value">{df['correct'].mean()*100:.1f}%</div></div>
+          <div class="stat-card accent-purple"><span class="icon">📊</span><div class="label">Confianza</div><div class="value">{df['avg_conf'].mean():.1f}%</div></div>
+        </div>""",unsafe_allow_html=True)
         ver=df.groupby("app_version",dropna=False).agg(pruebas=("id","count"),precision=("correct","mean"),confianza=("avg_conf","mean")).reset_index();ver["precision"]*=100
         st.markdown("### Versiones");st.dataframe(ver,hide_index=True,use_container_width=True)
         pred=df["predicted_foods"].fillna("").str.split(",").str[0].str.strip();actual=df["actual_foods"].fillna("").str.split(",").str[0].str.strip()
@@ -1556,13 +1691,19 @@ elif page=="🎓 Aprende":
 
 elif page=="⚙️ Configuración":
     section("SISTEMA","Configuración","Claves y módulos.")
-    st.success("GROQ_API_KEY encontrada." if ai_key() else "Falta GROQ_API_KEY.")
+    ok=bool(ai_key())
+    st.markdown(f"""
+    <div class="stat-card {'accent-green' if ok else 'accent-orange'}" style="max-width:420px">
+      <span class="icon">{'✅' if ok else '⚠️'}</span>
+      <div class="label">Estado de IA KSC</div>
+      <div class="value" style="font-size:1.1rem">{'GROQ_API_KEY encontrada' if ok else 'Falta GROQ_API_KEY'}</div>
+    </div>""",unsafe_allow_html=True)
     st.code('GROQ_API_KEY = "TU_TOKEN"\n# opcional:\nUSDA_API_KEY = "TU_CLAVE_USDA"',language="toml")
     if st.button("Probar IA",type="primary"):
         try:
             ids={m.id for m in ai_client(ai_key()).models.list().data}
             st.success("IA KSC lista." if AI_MODEL in ids else "Conexión OK, modelo no visible.")
         except Exception as e:st.error(str(e))
-    st.markdown("### Push-Up Arena")
+    st.markdown("### 💪 Push-Up Arena")
     st.code("pip install streamlit-webrtc mediapipe av opencv-python-headless",language="powershell")
     st.info("IA KSC es un asistente nutricional educativo diseñado por los alumnos César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena.")
