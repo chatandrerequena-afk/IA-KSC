@@ -1,18 +1,10 @@
-# --- Núcleo obligatorio (sin esto la app no arranca) ---
-streamlit>=1.38
-pandas
-requests
-Pillow
-groq
-
-# --- Voz realista gratis (Edge TTS para hablar) ---
-# Si falta, la app sigue funcionando pero sin audio de voz.
-edge-tts>=6.1.9
-
-# --- Arena Push-Up con esqueleto en cámara (opcional) ---
-# Si falta, esa pestaña muestra un registro manual en vez de la cámara en vivo.
-streamlit-webrtc
-mediapipe
-av
-opencv-python-headless
-aiortc
+groq>=0.31.0
+openai>=1.99.0
+gradio>=5.40.0,<7
+python-dotenv>=1.0.1
+ddgs>=9.5.0
+reportlab>=4.2.0
+python-docx>=1.1.2
+openpyxl>=3.1.5
+python-pptx>=1.0.2
+Pillow>=11.0.0
