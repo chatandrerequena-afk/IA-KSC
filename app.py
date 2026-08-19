@@ -1710,4 +1710,3 @@ elif page=="⚙️ Configuración":
     st.markdown("### 💪 Push-Up Arena")
     st.code("pip install streamlit-webrtc mediapipe av opencv-python-headless",language="powershell")
     st.info("IA KSC es un asistente nutricional educativo diseñado por los alumnos César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena.")
-
