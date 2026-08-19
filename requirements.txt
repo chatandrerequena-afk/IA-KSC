@@ -1,5 +1,17 @@
-streamlit
-pandas
-requests
-Pillow
-groq
+# ============================================================
+# IA KSC / NutriVision — requirements.txt
+# ============================================================
+
+# --- Núcleo de la app ---
+streamlit>=1.45,<2
+groq==1.6.0
+requests>=2.32,<3
+pillow>=10,<13
+pandas>=2.2,<3
+
+# --- Push-Up Arena (cámara + detección de pose) ---
+streamlit-webrtc>=0.47,<1
+mediapipe>=0.10,<1
+av>=11,<13
+opencv-python-headless>=4.9,<5
+aiortc>=1.9,<2
