@@ -1,3 +1,4 @@
+
 import os
 import io
 import re
@@ -9,7 +10,6 @@ import hashlib
 import secrets as pysecrets
 import sqlite3
 import threading
-import textwrap
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
@@ -57,308 +57,42 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-
 :root{
- --bg:#060f0b;--panel:#0b1b13;--panel2:#0e2117;--line:rgba(255,255,255,.09);
- --text:#f4fff8;--muted:#9cb7a8;--green:#56f09f;--green2:#22c98a;--yellow:#ffd166;
- --blue:#6ab8ff;--purple:#b28dff;--orange:#ff9d5c;--red:#ff6b7a;
- --radius:20px;--ease:cubic-bezier(.16,1,.3,1);
+ --bg:#06110c;--panel:#0b1b13;--line:rgba(255,255,255,.08);
+ --text:#f4fff8;--muted:#9cb7a8;--green:#56f09f;--yellow:#ffd166;
 }
-*{ scrollbar-width:thin; scrollbar-color:rgba(86,240,159,.35) transparent; }
-::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:rgba(86,240,159,.35);border-radius:99px}
-::-webkit-scrollbar-thumb:hover{background:rgba(86,240,159,.55)}
-
-html, body, [class*="css"], .stApp{
- font-family:'Manrope','Plus Jakarta Sans',-apple-system,sans-serif;
-}
-
-@keyframes fadeInUp{ from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
-@keyframes fadeIn{ from{opacity:0} to{opacity:1} }
-@keyframes floatSoft{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-@keyframes pulseGlow{
- 0%,100%{box-shadow:0 0 0 0 rgba(86,240,159,.35)}
- 50%{box-shadow:0 0 0 10px rgba(86,240,159,0)}
-}
-@keyframes flameFlicker{
- 0%,100%{transform:scale(1) rotate(-2deg)}
- 25%{transform:scale(1.08) rotate(2deg)}
- 50%{transform:scale(0.96) rotate(-1deg)}
- 75%{transform:scale(1.05) rotate(1deg)}
-}
-@keyframes shimmer{
- 0%{background-position:-400px 0}
- 100%{background-position:400px 0}
-}
-@keyframes gradientShift{
- 0%{background-position:0% 50%}
- 50%{background-position:100% 50%}
- 100%{background-position:0% 50%}
-}
-@keyframes popIn{
- 0%{opacity:0;transform:scale(.85)}
- 70%{transform:scale(1.03)}
- 100%{opacity:1;transform:scale(1)}
-}
-@keyframes ringFill{ from{stroke-dashoffset:var(--ring-start,283)} to{stroke-dashoffset:var(--ring-end,283)} }
-
 .stApp{
  background:
- radial-gradient(circle at 8% 0%,rgba(86,240,159,.14),transparent 30%),
- radial-gradient(circle at 94% 5%,rgba(106,184,255,.09),transparent 24%),
- radial-gradient(circle at 50% 100%,rgba(178,141,255,.06),transparent 35%),
- linear-gradient(180deg,#060f0b 0%,#07150f 75%);
- animation:fadeIn .5s var(--ease);
+ radial-gradient(circle at 8% 0%,rgba(86,240,159,.13),transparent 28%),
+ radial-gradient(circle at 94% 5%,rgba(106,184,255,.08),transparent 22%),
+ linear-gradient(180deg,#06110c 0%,#07150f 75%);
 }
 .block-container{max-width:1320px;padding-top:1.1rem;padding-bottom:4rem}
-
-/* Elementos que entran a la vista con una leve animación */
-.block-container > div{ animation:fadeInUp .45s var(--ease) both; }
-
-[data-testid="stSidebar"]{
- background:linear-gradient(180deg,#07140e,#091a12);
- border-right:1px solid var(--line);
-}
+[data-testid="stSidebar"]{background:linear-gradient(180deg,#07140e,#091a12);border-right:1px solid var(--line)}
 [data-testid="stSidebar"] *{color:#effff6}
-[data-testid="stSidebar"] [role="radiogroup"] label{
- border-radius:14px;padding:9px 12px;margin-bottom:3px;
- transition:all .22s var(--ease);
- border:1px solid transparent;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label:hover{
- background:rgba(86,240,159,.10);border-color:rgba(86,240,159,.22);
- transform:translateX(3px);
-}
-[data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"],
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
- background:linear-gradient(90deg,rgba(86,240,159,.18),rgba(86,240,159,.03));
- border-color:rgba(86,240,159,.35);
- box-shadow:0 4px 14px rgba(86,240,159,.10);
-}
-
 h1,h2,h3{letter-spacing:-.035em}
-
-.hero{
- padding:34px 36px;border:1px solid var(--line);border-radius:28px;position:relative;overflow:hidden;
+.hero{padding:34px 36px;border:1px solid var(--line);border-radius:28px;
  background:radial-gradient(circle at 84% 18%,rgba(86,240,159,.19),transparent 28%),
  linear-gradient(135deg,rgba(17,44,29,.97),rgba(6,17,12,.98));
- box-shadow:0 24px 80px rgba(0,0,0,.28);margin-bottom:20px;
- animation:fadeInUp .55s var(--ease) both;
-}
-.hero::after{
- content:"";position:absolute;inset:0;pointer-events:none;
- background:linear-gradient(120deg,transparent 30%,rgba(86,240,159,.06) 50%,transparent 70%);
- background-size:220% 220%;animation:gradientShift 9s ease-in-out infinite;
-}
-.badge{
- display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;
- background:rgba(86,240,159,.09);border:1px solid rgba(86,240,159,.25);
- color:#87f6ba;font-size:.80rem;font-weight:850;position:relative;z-index:1;
-}
-.badge::before{
- content:"";width:7px;height:7px;border-radius:99px;background:var(--green);
- animation:pulseGlow 1.8s ease-in-out infinite;
-}
-.hero-title{font-size:3.3rem;font-weight:950;line-height:1;letter-spacing:-.055em;color:white;margin:15px 0 10px;position:relative;z-index:1}
-.green{
- background:linear-gradient(90deg,var(--green),#8bffce,var(--green));
- background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
- animation:gradientShift 4s linear infinite;
-}
-.hero-sub{color:#b8d3c4;max-width:920px;font-size:1.04rem;line-height:1.6;position:relative;z-index:1}
-
-.mini{
- height:100%;background:rgba(255,255,255,.025);border:1px solid var(--line);border-radius:18px;padding:17px;
- transition:transform .28s var(--ease),border-color .28s var(--ease),box-shadow .28s var(--ease);
-}
-.mini:hover{transform:translateY(-4px);border-color:rgba(86,240,159,.30);box-shadow:0 16px 40px rgba(0,0,0,.22)}
-
+ box-shadow:0 24px 80px rgba(0,0,0,.26);margin-bottom:20px}
+.badge{display:inline-flex;padding:7px 12px;border-radius:999px;background:rgba(86,240,159,.09);
+ border:1px solid rgba(86,240,159,.23);color:#87f6ba;font-size:.80rem;font-weight:850}
+.hero-title{font-size:3.3rem;font-weight:950;line-height:1;letter-spacing:-.055em;color:white;margin:15px 0 10px}
+.green{color:var(--green)}
+.hero-sub{color:#b8d3c4;max-width:920px;font-size:1.04rem;line-height:1.6}
+.mini{height:100%;background:rgba(255,255,255,.025);border:1px solid var(--line);border-radius:18px;padding:17px}
 .kicker{font-size:.74rem;font-weight:900;letter-spacing:.11em;color:#77ecab}
 .big{font-size:1.55rem;font-weight:900;color:white;margin-top:4px}
 .note{font-size:.84rem;color:var(--muted);line-height:1.5;margin-top:4px}
-
-.chip{
- display:inline-block;padding:6px 10px;margin:3px;border-radius:999px;
- background:rgba(86,240,159,.08);border:1px solid rgba(86,240,159,.18);font-size:.78rem;font-weight:800;
- transition:all .2s var(--ease);
-}
-.chip:hover{background:rgba(86,240,159,.16);transform:translateY(-1px)}
-
-/* --- Tarjetas de estadísticas estilo Fitia --- */
-.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:6px 0 22px}
-@media (max-width:900px){ .stat-grid{grid-template-columns:repeat(2,1fr)} }
-.stat-card{
- position:relative;overflow:hidden;border-radius:20px;padding:18px 18px 16px;
- background:linear-gradient(160deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
- border:1px solid var(--line);animation:popIn .5s var(--ease) both;
- transition:transform .25s var(--ease),box-shadow .25s var(--ease),border-color .25s var(--ease);
-}
-.stat-card:hover{transform:translateY(-5px) scale(1.015);box-shadow:0 18px 46px rgba(0,0,0,.30);border-color:rgba(86,240,159,.30)}
-.stat-card .icon{font-size:1.5rem;display:inline-block;animation:floatSoft 3.4s ease-in-out infinite}
-.stat-card .label{font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:8px}
-.stat-card .value{font-size:1.7rem;font-weight:950;color:white;letter-spacing:-.03em;margin-top:2px}
-.stat-card .sub{font-size:.78rem;color:var(--muted);margin-top:3px}
-.stat-card.accent-green{border-color:rgba(86,240,159,.22)}
-.stat-card.accent-blue{border-color:rgba(106,184,255,.22)}
-.stat-card.accent-purple{border-color:rgba(178,141,255,.22)}
-.stat-card.accent-orange{border-color:rgba(255,157,92,.22)}
-
-/* --- Racha (streak) tipo Fitia --- */
-.streak-card{
- display:flex;align-items:center;gap:14px;padding:16px 20px;border-radius:20px;
- background:linear-gradient(120deg,rgba(255,157,92,.14),rgba(255,209,102,.05));
- border:1px solid rgba(255,157,92,.30);animation:popIn .55s var(--ease) both;
-}
-.streak-flame{font-size:2.1rem;animation:flameFlicker 1.6s ease-in-out infinite;filter:drop-shadow(0 0 10px rgba(255,157,92,.55))}
-.streak-days{font-size:1.6rem;font-weight:950;color:#ffcf9a;letter-spacing:-.03em;line-height:1}
-.streak-label{font-size:.78rem;color:var(--muted);font-weight:700;margin-top:2px}
-
-.level-card{
- padding:20px;border-radius:22px;
- background:linear-gradient(135deg,rgba(86,240,159,.10),rgba(178,141,255,.06));
- border:1px solid rgba(86,240,159,.20);position:relative;overflow:hidden;
- animation:fadeInUp .5s var(--ease) both;
- transition:transform .25s var(--ease);
-}
-.level-card:hover{transform:translateY(-3px)}
-
-.water-alert{
- padding:14px 16px;border-radius:16px;border:1px solid rgba(106,184,255,.28);
- background:rgba(106,184,255,.08);animation:fadeInUp .4s var(--ease) both;
-}
-.lock{padding:22px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);animation:fadeInUp .4s var(--ease) both}
-
-/* Métricas nativas de Streamlit, con estilo unificado */
-div[data-testid="stMetric"]{
- background:rgba(255,255,255,.028);border:1px solid var(--line);padding:14px 16px;border-radius:18px;
- transition:transform .25s var(--ease),border-color .25s var(--ease);
-}
-div[data-testid="stMetric"]:hover{transform:translateY(-3px);border-color:rgba(86,240,159,.28)}
-div[data-testid="stMetricValue"]{font-weight:900}
-
-/* Botones con micro-interacción */
-.stButton>button{
- border-radius:14px!important;font-weight:850!important;
- transition:transform .18s var(--ease),box-shadow .18s var(--ease),filter .18s var(--ease)!important;
-}
-.stButton>button:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(86,240,159,.18);filter:brightness(1.05)}
-.stButton>button:active{transform:translateY(0) scale(.98)}
-button[kind="primary"]{
- background:linear-gradient(90deg,var(--green2),var(--green))!important;
- background-size:180% auto!important;
- animation:none;
-}
-button[kind="primary"]:hover{background-position:right center!important}
-
-/* Barra de progreso animada */
-div[data-testid="stProgress"] > div > div{
- background:linear-gradient(90deg,var(--green2),var(--green),#8bffce)!important;
- background-size:200% auto!important;animation:gradientShift 3s linear infinite;
- border-radius:99px!important;
-}
-div[data-testid="stProgress"]{border-radius:99px;overflow:hidden}
-
-/* Tarjetas/contenedores con borde de Streamlit */
-div[data-testid="stVerticalBlockBorderWrapper"]{
- transition:transform .25s var(--ease),box-shadow .25s var(--ease);
- border-radius:18px!important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]:hover{transform:translateY(-2px)}
-
-/* Tabs con subrayado animado */
-.stTabs [data-baseweb="tab-list"]{gap:4px}
-.stTabs [data-baseweb="tab"]{
- border-radius:12px 12px 0 0!important;transition:all .2s var(--ease);
-}
-.stTabs [aria-selected="true"]{
- background:rgba(86,240,159,.10)!important;
-}
-
-/* Responsive: móvil */
-@media (max-width:768px){
- .hero{padding:24px 20px;border-radius:22px}
- .hero-title{font-size:2.1rem}
- .hero-sub{font-size:.92rem}
- .block-container{padding-top:.6rem}
- .stat-grid{grid-template-columns:repeat(2,1fr);gap:10px}
- .stat-card .value{font-size:1.35rem}
- .streak-card{padding:12px 16px}
-}
-
+.chip{display:inline-block;padding:6px 10px;margin:3px;border-radius:999px;
+ background:rgba(86,240,159,.08);border:1px solid rgba(86,240,159,.18);font-size:.78rem;font-weight:800}
+.level-card{padding:18px;border-radius:20px;background:linear-gradient(135deg,rgba(86,240,159,.08),rgba(178,141,255,.05));
+ border:1px solid rgba(86,240,159,.16)}
+.water-alert{padding:14px 16px;border-radius:16px;border:1px solid rgba(106,184,255,.25);background:rgba(106,184,255,.07)}
+.lock{padding:22px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03)}
+div[data-testid="stMetric"]{background:rgba(255,255,255,.025);border:1px solid var(--line);padding:12px 14px;border-radius:16px}
+.stButton>button{border-radius:14px!important;font-weight:850!important}
 footer{visibility:hidden}
-#MainMenu{visibility:hidden}
-
-/* --- Desbloqueos tipo grid de logros --- */
-.unlock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:8px}
-.unlock-card{
- border-radius:16px;padding:14px;text-align:center;border:1px solid var(--line);
- background:rgba(255,255,255,.02);transition:all .3s var(--ease);animation:popIn .45s var(--ease) both;
-}
-.unlock-card.open{
- background:linear-gradient(160deg,rgba(86,240,159,.14),rgba(86,240,159,.02));
- border-color:rgba(86,240,159,.35);
-}
-.unlock-card.open:hover{transform:translateY(-4px) scale(1.02);box-shadow:0 14px 34px rgba(86,240,159,.14)}
-.unlock-card.closed{opacity:.55;filter:grayscale(.35)}
-.unlock-card .uicon{font-size:1.8rem;display:block;margin-bottom:6px}
-.unlock-card .uname{font-size:.86rem;font-weight:800;color:white}
-.unlock-card .ureq{font-size:.72rem;color:var(--muted);margin-top:3px}
-
-/* --- Banner de ganador --- */
-.winner-banner{
- padding:20px 24px;border-radius:20px;text-align:center;margin:10px 0;
- background:linear-gradient(120deg,rgba(255,209,102,.16),rgba(86,240,159,.08));
- border:1px solid rgba(255,209,102,.35);animation:popIn .5s var(--ease) both;
-}
-.winner-banner .wtitle{font-size:1.5rem;font-weight:950;color:#ffe4a3}
-
-/* --- Avatar circular de perfil --- */
-.avatar-ring{
- width:86px;height:86px;border-radius:99px;display:flex;align-items:center;justify-content:center;
- background:linear-gradient(135deg,var(--green2),var(--blue));font-weight:950;font-size:1.7rem;color:#04140c;
- box-shadow:0 8px 26px rgba(86,240,159,.25);margin:0 auto 10px;
- border:3px solid rgba(255,255,255,.12);
-}
-.avatar-photo{
- width:86px;height:86px;border-radius:99px;object-fit:cover;display:block;margin:0 auto 10px;
- border:3px solid rgba(86,240,159,.35);box-shadow:0 8px 26px rgba(0,0,0,.3);
-}
-
-/* --- Fila de ranking con medallas --- */
-.rank-row{
- display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:14px;margin-bottom:6px;
- background:rgba(255,255,255,.025);border:1px solid var(--line);transition:transform .2s var(--ease);
-}
-.rank-row:hover{transform:translateX(3px)}
-.rank-row.top1{background:linear-gradient(90deg,rgba(255,209,102,.14),transparent);border-color:rgba(255,209,102,.3)}
-.rank-row.top2{background:linear-gradient(90deg,rgba(200,210,220,.12),transparent);border-color:rgba(200,210,220,.25)}
-.rank-row.top3{background:linear-gradient(90deg,rgba(255,157,92,.12),transparent);border-color:rgba(255,157,92,.25)}
-.rank-pos{font-weight:950;font-size:1.05rem;min-width:28px}
-.rank-name{flex:1;font-weight:700}
-.rank-val{font-weight:900;color:var(--green)}
-
-/* --- Sidebar: tarjeta de perfil activo --- */
-.side-profile{
- padding:14px;border-radius:16px;background:rgba(86,240,159,.06);
- border:1px solid rgba(86,240,159,.18);text-align:center;margin-bottom:10px;
- animation:fadeInUp .4s var(--ease) both;
-}
-.side-avatar{
- width:52px;height:52px;border-radius:99px;margin:0 auto 8px;object-fit:cover;
- border:2px solid rgba(86,240,159,.4);
-}
-.side-avatar-fallback{
- width:52px;height:52px;border-radius:99px;margin:0 auto 8px;
- background:linear-gradient(135deg,var(--green2),var(--blue));
- display:flex;align-items:center;justify-content:center;font-weight:900;color:#04140c;
-}
-.brand-row{display:flex;align-items:center;gap:10px;margin-bottom:2px}
-.brand-icon{
- width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;
- background:linear-gradient(135deg,var(--green2),var(--blue));font-size:1.15rem;
- animation:floatSoft 3.6s ease-in-out infinite;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1143,37 +877,17 @@ def render_pushup_camera(cid,pid):
 # UI
 # ============================================================
 
-def hero(p=None):
-    extra=""
-    if p:
-        pts,lvl,_=level_info(p["id"]);r=streak(p["id"])
-        extra=(
-            '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;position:relative;z-index:1">'
-            f'<span class="chip">👋 Hola, {p["name"]}</span>'
-            f'<span class="chip">{lvl[2]} {lvl[1]}</span>'
-            f'<span class="chip">🏆 {pts} pts</span>'
-            f'<span class="chip">🔥 {r} día{"s" if r!=1 else ""} de racha</span>'
-            '</div>'
-        )
-    st.markdown(
-        '<div class="hero">'
-        '<span class="badge">● EUREKA 2026 · NUTRIVISION</span>'
-        '<div class="hero-title">IA <span class="green">KSC</span></div>'
-        '<div class="hero-sub">Diario de comidas, perfiles, retos, puntos, recetas, planes, cámara, progreso y laboratorio Eureka.</div>'
-        f'{extra}'
-        '</div>',
-        unsafe_allow_html=True
-    )
+def hero():
+    st.markdown("""
+    <div class="hero">
+      <span class="badge">● EUREKA 2026 · NUTRIVISION</span>
+      <div class="hero-title">IA <span class="green">KSC</span></div>
+      <div class="hero-sub">Diario de comidas, perfiles, retos, puntos, recetas, planes, cámara, progreso y laboratorio Eureka.</div>
+    </div>
+    """,unsafe_allow_html=True)
 
 def section(k,t,s):
     st.markdown(f'<div class="kicker">{k.upper()}</div><div style="font-size:2.05rem;font-weight:950;color:white">{t}</div><div class="note">{s}</div><br>',unsafe_allow_html=True)
-
-def profile_photo_b64(path):
-    try:
-        raw=Path(path).read_bytes()
-        return "data:image/jpeg;base64,"+base64.b64encode(raw).decode()
-    except Exception:
-        return None
 
 def profile_selector():
     ps=list_profiles()
@@ -1187,23 +901,13 @@ def profile_selector():
     key=f"unlocked_{pid}"
     if not p.get("pin_hash"):st.session_state[key]=True
     if not st.session_state.get(key):
-        st.sidebar.markdown(f'<div class="side-profile"><div class="side-avatar-fallback">🔒</div><b>{p["name"]}</b><div class="note" style="margin-top:2px">Perfil bloqueado</div></div>',unsafe_allow_html=True)
         pin=st.sidebar.text_input("PIN",type="password",max_chars=4,key=f"pin_{pid}")
-        if st.sidebar.button("🔓 Desbloquear",use_container_width=True,type="primary"):
+        if st.sidebar.button("Desbloquear",use_container_width=True):
             if verify_pin(pin,p["pin_hash"]):st.session_state[key]=True;st.rerun()
             else:st.sidebar.error("PIN incorrecto.")
         return None
-    photo=p.get("photo_path")
-    b64=profile_photo_b64(photo) if photo and Path(photo).exists() else None
-    avatar_html=f'<img src="{b64}" class="side-avatar">' if b64 else f'<div class="side-avatar-fallback">{p["name"][:1].upper()}</div>'
-    r=streak(p["id"])
-    st.sidebar.markdown(f"""
-    <div class="side-profile">
-      {avatar_html}
-      <b>{p['name']}</b>
-      <div style="margin-top:6px"><span class="chip">{p['goal']}</span></div>
-      <div class="note" style="margin-top:4px">🔥 {r} día{'s' if r!=1 else ''} de racha</div>
-    </div>""",unsafe_allow_html=True)
+    st.sidebar.markdown(f"**{p['name']}**")
+    st.sidebar.markdown(f'<span class="chip">{p["goal"]}</span>',unsafe_allow_html=True)
     if st.sidebar.button("🔒 Bloquear",use_container_width=True):st.session_state[key]=False;st.rerun()
     return p
 
@@ -1217,8 +921,8 @@ def need_profile(p):
 # ============================================================
 
 with st.sidebar:
-    st.markdown('<div class="brand-row"><div class="brand-icon">🥗</div><div style="font-size:1.3rem;font-weight:950;color:white;letter-spacing:-.03em">IA KSC</div></div>',unsafe_allow_html=True)
-    st.caption(f"NutriVision · V{APP_VERSION}")
+    st.markdown("## 🥗 IA KSC")
+    st.caption("NutriVision · V5.1")
     st.markdown("---")
     page=st.radio("Menú",[
         "🏠 Dashboard",
@@ -1240,7 +944,7 @@ with st.sidebar:
     st.markdown("---")
     profile=profile_selector()
 
-hero(profile)
+hero()
 
 # ============================================================
 # DASHBOARD
@@ -1253,39 +957,7 @@ if page=="🏠 Dashboard":
         total,meals=day_totals(profile["id"]);water=water_today(profile["id"]);goal=int(profile.get("water_goal_ml") or 2000)
         pts,lvl,nxt=level_info(profile["id"]);racha=streak(profile["id"])
         if water==0:st.markdown('<div class="water-alert"><b>💧 Falta registrar agua hoy.</b> El control diario de agua forma parte obligatoria del dashboard.</div>',unsafe_allow_html=True)
-
-        wpct=min(100,round(water/goal*100)) if goal else 0
-        st.markdown(textwrap.dedent(f"""
-        <div class="stat-grid">
-          <div class="stat-card accent-orange" style="animation-delay:.02s">
-            <span class="icon">🔥</span>
-            <div class="label">Calorías hoy</div>
-            <div class="value">{total['kcal']:.0f}</div>
-            <div class="sub">kcal registradas</div>
-          </div>
-          <div class="stat-card accent-blue" style="animation-delay:.08s">
-            <span class="icon">💧</span>
-            <div class="label">Hidratación</div>
-            <div class="value">{water} <span style="font-size:.95rem;color:var(--muted);font-weight:700">/ {goal} ml</span></div>
-            <div class="sub">{wpct}% de tu meta</div>
-          </div>
-          <div class="stat-card accent-purple" style="animation-delay:.14s">
-            <span class="icon">🏆</span>
-            <div class="label">Puntos KSC</div>
-            <div class="value">{pts}</div>
-            <div class="sub">Nivel {lvl[2]} {lvl[1]}</div>
-          </div>
-          <div class="stat-card accent-green" style="animation-delay:.2s">
-            <div class="streak-card" style="border:none;background:none;padding:0;gap:10px">
-              <span class="streak-flame">🔥</span>
-              <div>
-                <div class="streak-days">{racha}</div>
-                <div class="streak-label">día{'s' if racha!=1 else ''} de racha</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        """),unsafe_allow_html=True)
+        a,b,c,d=st.columns(4);a.metric("🔥 kcal",f"{total['kcal']:.0f}");b.metric("💧 Agua",f"{water}/{goal} ml");c.metric("🏆 Puntos",pts);d.metric("🔥 Racha",f"{racha} días")
         show_metrics(total)
         st.markdown("### 🤖 ¿Qué puedo comer ahora?")
         hour=datetime.now().hour
@@ -1334,9 +1006,7 @@ elif page=="👤 Perfiles":
     with t2:
         if not profile:st.info("Desbloquea un perfil.")
         else:
-            b64=profile_photo_b64(profile["photo_path"]) if profile.get("photo_path") and Path(profile["photo_path"]).exists() else None
-            if b64:st.markdown(f'<img src="{b64}" class="avatar-photo" style="width:120px;height:120px">',unsafe_allow_html=True)
-            else:st.markdown(f'<div class="avatar-ring" style="width:120px;height:120px;font-size:2.2rem">{profile["name"][:1].upper()}</div>',unsafe_allow_html=True)
+            if profile.get("photo_path") and Path(profile["photo_path"]).exists():st.image(profile["photo_path"],width=160)
             with st.form("editp"):
                 c1,c2=st.columns(2)
                 with c1:
@@ -1526,19 +1196,15 @@ elif page=="📅 Plan semanal":
 
 elif page=="💧 Agua & retos":
     need_profile(profile);section("RETOS","Agua + retos diarios","Este es el apartado de retos que faltaba en el archivo anterior.")
-    water=water_today(profile["id"]);goal=int(profile.get("water_goal_ml") or 2000);pct=min(100,round(water/goal*100) if goal else 0)
-    st.markdown(f'<div class="water-alert" style="display:flex;justify-content:space-between;align-items:center"><div><div class="kicker">HIDRATACIÓN DE HOY</div><div class="big">💧 {water} <span style="color:var(--muted);font-size:1rem">/ {goal} ml</span></div></div><div style="font-size:1.6rem;font-weight:950;color:var(--blue)">{pct}%</div></div>',unsafe_allow_html=True)
-    st.progress(min(1.,water/goal if goal else 0))
+    water=water_today(profile["id"]);goal=int(profile.get("water_goal_ml") or 2000)
+    st.progress(min(1.,water/goal if goal else 0));st.markdown(f"## 💧 {water}/{goal} ml")
     cc=st.columns(4)
     for col,ml in zip(cc,[250,350,500,750]):
         if col.button(f"+{ml} ml",use_container_width=True):log_water(profile["id"],ml);st.rerun()
     st.markdown("### 🎯 Retos de hoy")
-    goals=daily_goals(profile["id"]);done_n=sum(1 for g in goals if g["completed"])
-    st.progress(done_n/len(goals) if goals else 0);st.caption(f"{done_n}/{len(goals)} retos completados hoy")
-    for g in goals:
-        with st.container(border=True):
-            a,b=st.columns([.8,.2]);a.write(("✅ " if g["completed"] else "⬜ ")+g["goal_name"])
-            if not g["completed"] and b.button("Completar",key=f"goal_{g['id']}"):complete_goal(g["id"],profile["id"]);st.rerun()
+    for g in daily_goals(profile["id"]):
+        a,b=st.columns([.8,.2]);a.write(("✅ " if g["completed"] else "⬜ ")+g["goal_name"])
+        if not g["completed"] and b.button("Completar",key=f"goal_{g['id']}"):complete_goal(g["id"],profile["id"]);st.rerun()
 
 # ============================================================
 # GAME
@@ -1547,27 +1213,12 @@ elif page=="💧 Agua & retos":
 elif page=="🏆 KSC Game":
     need_profile(profile);section("JUEGO","Puntos, niveles y desbloqueos","Completa hábitos, recetas, quizzes y retos.")
     pts,lvl,nxt=level_info(profile["id"]);r=streak(profile["id"])
-    lc,rc=st.columns([2,1])
-    with lc:
-        st.markdown(f'<div class="level-card"><div class="kicker">NIVEL ACTUAL</div><div class="big" style="font-size:2rem">{lvl[2]} {lvl[1]}</div><div class="note">{pts} puntos acumulados</div></div>',unsafe_allow_html=True)
-    with rc:
-        st.markdown(f'<div class="streak-card"><span class="streak-flame">🔥</span><div><div class="streak-days">{r}</div><div class="streak-label">día{"s" if r!=1 else ""} seguidos</div></div></div>',unsafe_allow_html=True)
+    st.markdown(f'<div class="level-card"><div class="kicker">NIVEL</div><div class="big">{lvl[2]} {lvl[1]}</div><div class="note">{pts} puntos · racha {r} días</div></div>',unsafe_allow_html=True)
     if nxt:st.progress((pts-lvl[0])/(nxt[0]-lvl[0]));st.caption(f"Faltan {nxt[0]-pts} puntos para {nxt[2]} {nxt[1]}")
     st.markdown("### 🔓 Desbloqueos")
-    cards=""
     for need,name in [(100,"🧃 Laboratorio de batidos"),(250,"🍰 Chef de postres"),(500,"📅 Planificador Maestro"),(900,"👑 Leyenda"),(1500,"💎 Elite")]:
-        icon,label=name.split(" ",1);opened=pts>=need
-        cards+=f'<div class="unlock-card {"open" if opened else "closed"}"><span class="uicon">{icon if opened else "🔒"}</span><div class="uname">{label}</div><div class="ureq">{need} puntos</div></div>'
-    st.markdown(f'<div class="unlock-grid">{cards}</div>',unsafe_allow_html=True)
-    st.markdown("### 🏅 Ranking general")
-    rank=leaderboard()
-    medals={0:"🥇",1:"🥈",2:"🥉"}
-    rows=""
-    for i,row in rank.iterrows():
-        cls=f"top{i+1}" if i<3 else ""
-        pos=medals.get(i,f"#{i+1}")
-        rows+=f'<div class="rank-row {cls}"><div class="rank-pos">{pos}</div><div class="rank-name">{row["name"]}</div><div class="rank-val">{int(row["points"])} pts</div></div>'
-    st.markdown(rows if rows else '<div class="note">Aún no hay puntajes.</div>',unsafe_allow_html=True)
+        st.write("✅" if pts>=need else "🔒",name,f"· {need} puntos")
+    rank=leaderboard();rank.insert(0,"Posición",range(1,len(rank)+1));st.dataframe(rank,hide_index=True,use_container_width=True)
 
 # ============================================================
 # PUSH-UP
@@ -1595,18 +1246,10 @@ elif page=="💪 Push-Up Arena":
         ats=attempts(c["id"])
         if len(ats)>=2:
             order=sorted(ats,key=lambda x:x["reps"],reverse=True)
-            if order[0]["reps"]==order[1]["reps"]:
-                st.markdown('<div class="winner-banner"><div class="wtitle">🤝 Empate</div></div>',unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="winner-banner"><span class="streak-flame" style="font-size:2rem">🏆</span><div class="wtitle">{order[0]["name"]}</div><div class="note">{order[0]["reps"]} push-ups en el minuto</div></div>',unsafe_allow_html=True)
+            st.markdown("## 🤝 Empate" if order[0]["reps"]==order[1]["reps"] else f"## 🏆 Ganador: {order[0]['name']} · {order[0]['reps']} push-ups")
             for a in ats:
                 if a.get("video_path") and Path(a["video_path"]).exists():st.video(a["video_path"])
-    st.markdown("### 🏅 Ranking Push-Up")
-    pr=pushup_ranking();medals={0:"🥇",1:"🥈",2:"🥉"};rows=""
-    for i,row in pr.iterrows():
-        cls=f"top{i+1}" if i<3 else "";pos=medals.get(i,f"#{i+1}")
-        rows+=f'<div class="rank-row {cls}"><div class="rank-pos">{pos}</div><div class="rank-name">{row["name"]}</div><div class="rank-val">{int(row["mejor_marca"])} reps</div></div>'
-    st.markdown(rows if rows else '<div class="note">Sin intentos aún.</div>',unsafe_allow_html=True)
+    st.markdown("### Ranking Push-Up");st.dataframe(pushup_ranking(),hide_index=True,use_container_width=True)
 
 # ============================================================
 # PROGRESO
@@ -1616,24 +1259,14 @@ elif page=="📈 Progreso":
     need_profile(profile);section("PROGRESO","Peso y medidas","7, 30 o 90 días; tendencias, no diagnósticos.")
     t1,t2=st.tabs(["⚖️ Peso","📏 Medidas"])
     with t1:
-        e=energy_estimate(profile);logs=weights(profile["id"])
-        delta=None
-        if len(logs)>=2:delta=logs[-1]["weight_kg"]-logs[0]["weight_kg"]
-        d1,d2=st.columns(2)
-        with d1:
-            arrow="▲" if delta and delta>0 else "▼" if delta and delta<0 else "▬"
-            dcolor="var(--orange)" if delta and delta>0 else "var(--green)" if delta and delta<0 else "var(--muted)"
-            sub=f'<span style="color:{dcolor}">{arrow} {abs(delta):.1f} kg en el periodo</span>' if delta is not None else "Sin variación registrada aún"
-            st.markdown(f'<div class="stat-card accent-green"><span class="icon">⚖️</span><div class="label">Peso actual</div><div class="value">{profile["weight_kg"]:.1f} kg</div><div class="sub">{sub}</div></div>',unsafe_allow_html=True)
-        with d2:
-            if e.get("enabled"):
-                st.markdown(f'<div class="stat-card accent-blue"><span class="icon">🔥</span><div class="label">Mantenimiento</div><div class="value">{e["maintenance"]} kcal</div><div class="sub">rango {e["target_low"]}–{e["target_high"]} kcal/día</div></div>',unsafe_allow_html=True)
-            else:
-                st.info(e.get("reason"))
+        e=energy_estimate(profile);st.metric("Peso actual",f"{profile['weight_kg']:.1f} kg")
+        if e.get("enabled"):st.caption(f"Mantenimiento aprox. {e['maintenance']} kcal/día · rango {e['target_low']}–{e['target_high']}")
+        else:st.info(e.get("reason"))
         with st.form("wform"):
             c1,c2,c3=st.columns(3);d=c1.date_input("Fecha",date.today());w=c2.number_input("Peso",30.,250.,float(profile["weight_kg"]),.1);wa=c3.number_input("Cintura opcional",0.,250.,0.,.5)
             note=st.text_input("Nota");save=st.form_submit_button("Guardar",type="primary")
         if save:add_weight(profile["id"],d,w,wa or None,note);st.rerun()
+        logs=weights(profile["id"])
         if logs:
             df=pd.DataFrame(logs);df["log_date"]=pd.to_datetime(df["log_date"]);st.line_chart(df.set_index("log_date")[["weight_kg"]]);st.dataframe(df,hide_index=True,use_container_width=True)
     with t2:
@@ -1654,12 +1287,7 @@ elif page=="🧪 Eureka Lab":
     con=db();df=pd.read_sql_query("""SELECT pt.*,p.name profile_name FROM plate_tests pt LEFT JOIN profiles p ON p.id=pt.profile_id ORDER BY pt.id""",con);con.close()
     if df.empty:st.warning("Aún no hay pruebas.")
     else:
-        st.markdown(textwrap.dedent(f"""
-        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
-          <div class="stat-card accent-green"><span class="icon">🧪</span><div class="label">Pruebas</div><div class="value">{len(df)}</div></div>
-          <div class="stat-card accent-blue"><span class="icon">🎯</span><div class="label">Precisión</div><div class="value">{df['correct'].mean()*100:.1f}%</div></div>
-          <div class="stat-card accent-purple"><span class="icon">📊</span><div class="label">Confianza</div><div class="value">{df['avg_conf'].mean():.1f}%</div></div>
-        </div>"""),unsafe_allow_html=True)
+        a,b,c=st.columns(3);a.metric("Pruebas",len(df));b.metric("Precisión",f"{df['correct'].mean()*100:.1f}%");c.metric("Confianza",f"{df['avg_conf'].mean():.1f}%")
         ver=df.groupby("app_version",dropna=False).agg(pruebas=("id","count"),precision=("correct","mean"),confianza=("avg_conf","mean")).reset_index();ver["precision"]*=100
         st.markdown("### Versiones");st.dataframe(ver,hide_index=True,use_container_width=True)
         pred=df["predicted_foods"].fillna("").str.split(",").str[0].str.strip();actual=df["actual_foods"].fillna("").str.split(",").str[0].str.strip()
@@ -1694,19 +1322,13 @@ elif page=="🎓 Aprende":
 
 elif page=="⚙️ Configuración":
     section("SISTEMA","Configuración","Claves y módulos.")
-    ok=bool(ai_key())
-    st.markdown(textwrap.dedent(f"""
-    <div class="stat-card {'accent-green' if ok else 'accent-orange'}" style="max-width:420px">
-      <span class="icon">{'✅' if ok else '⚠️'}</span>
-      <div class="label">Estado de IA KSC</div>
-      <div class="value" style="font-size:1.1rem">{'GROQ_API_KEY encontrada' if ok else 'Falta GROQ_API_KEY'}</div>
-    </div>"""),unsafe_allow_html=True)
+    st.success("GROQ_API_KEY encontrada." if ai_key() else "Falta GROQ_API_KEY.")
     st.code('GROQ_API_KEY = "TU_TOKEN"\n# opcional:\nUSDA_API_KEY = "TU_CLAVE_USDA"',language="toml")
     if st.button("Probar IA",type="primary"):
         try:
             ids={m.id for m in ai_client(ai_key()).models.list().data}
             st.success("IA KSC lista." if AI_MODEL in ids else "Conexión OK, modelo no visible.")
         except Exception as e:st.error(str(e))
-    st.markdown("### 💪 Push-Up Arena")
+    st.markdown("### Push-Up Arena")
     st.code("pip install streamlit-webrtc mediapipe av opencv-python-headless",language="powershell")
     st.info("IA KSC es un asistente nutricional educativo diseñado por los alumnos César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena.")
