@@ -13,12 +13,14 @@ import textwrap
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
+import asyncio
 import pandas as pd
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageOps
 from groq import Groq, AuthenticationError, RateLimitError, APIConnectionError, BadRequestError
+import edge_tts
 
 # ============================================================
 # IA KSC / NutriVision MGP — V6.0 (rediseño)
@@ -1259,79 +1261,82 @@ def render_pushup_camera(cid,pid):
             st.rerun()
 
 # ============================================================
-# VOZ: TTS + STT gratis con las APIs del navegador (sin claves)
+# VOZ REALISTA (gratis): edge-tts para hablar + Whisper (Groq) para
+# escuchar. Todo automático: grabas -> se transcribe -> se envía sola
+# -> IA KSC responde -> se reproduce con voz natural, sin copiar/pegar.
 # ============================================================
 
-def voice_reader_component(text, voice_hint="female", rate=1.0, autoplay=True, key="tts"):
-    """Lee 'text' en voz alta usando la Web Speech API del navegador (gratis, sin API key).
-    Elige una voz distinta a la voz por defecto del sistema para que 'suene diferente'."""
-    safe = json.dumps(text or "")
-    components.html(f"""
-    <div style="font-family:Manrope,sans-serif">
-      <button id="btn_{key}" style="background:linear-gradient(90deg,#22c98a,#56f09f);border:none;
-        color:#04140c;font-weight:800;padding:10px 16px;border-radius:12px;cursor:pointer;">
-        🔊 Escuchar respuesta
-      </button>
-      <span id="status_{key}" style="color:#9cb7a8;font-size:.8rem;margin-left:8px"></span>
-    </div>
-    <script>
-      const text_{key} = {safe};
-      function speak_{key}() {{
-        if (!window.speechSynthesis) {{
-          document.getElementById('status_{key}').innerText = 'Tu navegador no soporta voz.';
-          return;
-        }}
-        const utter = new SpeechSynthesisUtterance(text_{key});
-        utter.lang = 'es-ES';
-        utter.rate = {rate};
-        const voices = window.speechSynthesis.getVoices();
-        let chosen = voices.find(v => v.lang.startsWith('es') && /{voice_hint}/i.test(v.name));
-        if (!chosen) chosen = voices.find(v => v.lang.startsWith('es'));
-        if (chosen) utter.voice = chosen;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utter);
-      }}
-      document.getElementById('btn_{key}').addEventListener('click', speak_{key});
-      {"window.speechSynthesis.onvoiceschanged = () => {}; setTimeout(speak_" + key + ", 400);" if autoplay else ""}
-    </script>
-    """, height=54)
+VOICES = {
+    "🇵🇪 Camila (Perú, mujer)": "es-PE-CamilaNeural",
+    "🇵🇪 Alex (Perú, hombre)": "es-PE-AlexNeural",
+    "🇲🇽 Dalia (México, mujer)": "es-MX-DaliaNeural",
+    "🇲🇽 Jorge (México, hombre)": "es-MX-JorgeNeural",
+    "🇪🇸 Elvira (España, mujer)": "es-ES-ElviraNeural",
+    "🇪🇸 Álvaro (España, hombre)": "es-ES-AlvaroNeural",
+    "🇦🇷 Elena (Argentina, mujer)": "es-AR-ElenaNeural",
+    "🇦🇷 Tomás (Argentina, hombre)": "es-AR-TomasNeural",
+}
+DEFAULT_VOICE_LABEL = "🇵🇪 Camila (Perú, mujer)"
 
-def voice_input_component(key="stt"):
-    """Dictado por micrófono (Web Speech API, gratis). Al terminar de hablar, escribe el texto
-    en un campo que Streamlit puede leer via query param -> el usuario lo copia al chat."""
-    components.html(f"""
-    <div style="font-family:Manrope,sans-serif">
-      <button id="mic_{key}" style="background:linear-gradient(90deg,#6ab8ff,#b28dff);border:none;
-        color:#04140c;font-weight:800;padding:10px 16px;border-radius:12px;cursor:pointer;">
-        🎤 Hablar
-      </button>
-      <div id="out_{key}" style="margin-top:8px;color:#f4fff8;font-size:.95rem;min-height:24px;
-        background:rgba(255,255,255,.05);border-radius:10px;padding:8px 12px;"></div>
-    </div>
-    <script>
-      const SR_{key} = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const out_{key} = document.getElementById('out_{key}');
-      const btn_{key} = document.getElementById('mic_{key}');
-      if (!SR_{key}) {{
-        out_{key}.innerText = 'Tu navegador no soporta dictado por voz (usa Chrome).';
-      }} else {{
-        const rec_{key} = new SR_{key}();
-        rec_{key}.lang = 'es-PE';
-        rec_{key}.interimResults = false;
-        rec_{key}.maxAlternatives = 1;
-        btn_{key}.addEventListener('click', () => {{
-          out_{key}.innerText = '🎙️ Escuchando...';
-          rec_{key}.start();
-        }});
-        rec_{key}.onresult = (e) => {{
-          const said = e.results[0][0].transcript;
-          out_{key}.innerText = '📝 ' + said;
-          navigator.clipboard.writeText(said).catch(()=>{{}});
-        }};
-        rec_{key}.onerror = (e) => {{ out_{key}.innerText = 'Error: ' + e.error; }};
-      }}
-    </script>
-    """, height=110)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=60)
+def synth_speech(text, voice_id):
+    """Genera audio MP3 con una voz neuronal realista y gratuita (Microsoft Edge TTS,
+    sin API key). Cacheado para no regenerar el mismo texto dos veces."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    text = text[:1800]  # evita audios eternos
+
+    async def _run():
+        communicate = edge_tts.Communicate(text, voice_id, rate="+4%")
+        audio = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio += chunk["data"]
+        return audio
+
+    try:
+        return asyncio.run(_run())
+    except Exception:
+        return None
+
+def current_voice_id():
+    label = st.session_state.get("ksc_voice_label", DEFAULT_VOICE_LABEL)
+    return VOICES.get(label, VOICES[DEFAULT_VOICE_LABEL])
+
+def voice_picker(location=st.sidebar):
+    label = location.selectbox(
+        "🔊 Voz de IA KSC",
+        list(VOICES.keys()),
+        index=list(VOICES.keys()).index(st.session_state.get("ksc_voice_label", DEFAULT_VOICE_LABEL)),
+        key="ksc_voice_label",
+    )
+    return VOICES[label]
+
+def speak_reply(text, key="tts", autoplay=True):
+    """Reproduce 'text' con voz neuronal realista. autoplay=True suena solo, sin botón."""
+    audio = synth_speech(text, current_voice_id())
+    if audio:
+        st.audio(audio, format="audio/mp3", autoplay=autoplay)
+    else:
+        st.caption("No pude generar el audio ahora mismo (revisa tu conexión).")
+
+def transcribe_audio(audio_bytes):
+    """Transcribe voz a texto con Whisper vía Groq (gratis dentro de tu cuota de GROQ_API_KEY)."""
+    if not ai_key():
+        return None, "Falta GROQ_API_KEY."
+    try:
+        client = ai_client(ai_key())
+        result = client.audio.transcriptions.create(
+            file=("audio.wav", audio_bytes),
+            model="whisper-large-v3-turbo",
+            language="es",
+            response_format="text",
+        )
+        text = str(result).strip()
+        return (text or None), None
+    except Exception as e:
+        return None, f"No pude transcribir el audio: {e}"
 
 # ============================================================
 # UI
@@ -1437,6 +1442,8 @@ with st.sidebar:
     page=st.radio("Menú",MENU,label_visibility="collapsed")
     st.markdown("---")
     profile=profile_selector()
+    st.markdown("---")
+    voice_picker()
 
 hero(profile)
 sync_community()
@@ -1500,7 +1507,7 @@ if page=="🏠 Inicio":
             try:
                 ans=ksc_chat(profile,prompt)
                 st.markdown(ans)
-                voice_reader_component(ans, autoplay=False, key="home_tts")
+                speak_reply(ans, key="home_tts", autoplay=False)
             except RuntimeError as e:st.error(str(e))
         if meals:st.dataframe(pd.DataFrame(meals)[["meal_time","meal_type","title","kcal","protein","fiber"]],hide_index=True,use_container_width=True)
 
@@ -1653,7 +1660,7 @@ elif page=="📷 Diario de comidas":
                     if st.button("🤖 Analizar para mi perfil"):
                         try:
                             ans=ksc_chat(profile,f"Analiza este plato para mí: {[(x['name'],x['grams']) for x in calc]}. Totales {tot}.")
-                            st.markdown(ans);voice_reader_component(ans,autoplay=False,key="meal_tts")
+                            st.markdown(ans);speak_reply(ans,key="meal_tts",autoplay=False)
                         except Exception as e:st.error(str(e))
                     c1,c2=st.columns(2);mt=c1.selectbox("Momento",["Desayuno","Media mañana","Almuerzo","Merienda","Cena","Otro"]);title=c2.text_input("Nombre",res.get("summary","Mi comida")[:80])
                     note=st.text_input("Nota")
@@ -1724,7 +1731,7 @@ elif page=="🔎 Escáner de código de barras":
             if st.button("🤖 ¿Me conviene este producto?",type="primary"):
                 try:
                     ans=ksc_chat(profile,f"Analiza este producto escaneado para mi perfil: {json.dumps(info,ensure_ascii=False)}")
-                    st.markdown(ans);voice_reader_component(ans,autoplay=False,key="bc_tts")
+                    st.markdown(ans);speak_reply(ans,key="bc_tts",autoplay=False)
                 except Exception as e:st.error(str(e))
 
 # ============================================================
@@ -1749,7 +1756,7 @@ elif page=="🧾 Escáner de etiqueta":
         show_metrics(vals)
         if d.get("ingredients"):st.write("Ingredientes:",d["ingredients"])
         if profile.get("allergies"):st.warning("Tu perfil declara: "+profile["allergies"]+". Verifica siempre la etiqueta original.")
-        for w in d.get("warnings",[]):st.warning(w)
+        for w in d.get("warnings",[]) or []:st.warning(str(w))
 
 # ============================================================
 # COMPARAR PLATOS
@@ -1779,7 +1786,7 @@ elif page=="⚖️ Comparar platos":
             if st.button("🤖 ¿Cuál encaja mejor conmigo?"):
                 try:
                     ans=ksc_chat(profile,f"Compara estos platos para mi perfil. A={totals[0]}, B={totals[1]}. Explica contexto y alternativa.")
-                    st.markdown(ans);voice_reader_component(ans,autoplay=False,key="cmp_tts")
+                    st.markdown(ans);speak_reply(ans,key="cmp_tts",autoplay=False)
                 except Exception as e:st.error(str(e))
 
 # ============================================================
@@ -1788,24 +1795,48 @@ elif page=="⚖️ Comparar platos":
 
 elif page=="💬 Chat por voz con IA KSC":
     need_profile(profile)
-    section("CHAT","Habla con IA KSC","Escribe o habla por micrófono; IA KSC te puede responder también con voz. Solo alimentación, recetas y nutrición.")
+    section("CHAT","Habla con IA KSC","Habla o escribe. Al terminar de grabar se envía solo, IA KSC responde y se escucha con voz realista — sin copiar ni pegar nada.")
 
-    voice_on = st.toggle("🔊 Leer respuestas en voz alta automáticamente", value=False)
-    st.markdown("#### 🎤 Dictado por voz (gratis, funciona en Chrome)")
-    voice_input_component(key="chat_stt")
-    st.caption("Habla, y cuando termine copiará el texto — pégalo abajo con Ctrl+V / Cmd+V.")
+    c1,c2 = st.columns([1,1])
+    with c1:
+        voice_picker(location=c1)
+    with c2:
+        voice_on = st.toggle("🔊 Responder con voz automáticamente", value=True)
+
+    st.markdown("#### 🎤 Habla tu pregunta")
+    audio_val = st.audio_input("Toca para grabar, y suelta cuando termines de hablar")
+
+    auto_prompt = None
+    if audio_val is not None:
+        audio_bytes = audio_val.getvalue()
+        ahash = hashlib.md5(audio_bytes).hexdigest()
+        if st.session_state.get("last_audio_hash") != ahash:
+            st.session_state["last_audio_hash"] = ahash
+            with st.spinner("🎙️ Transcribiendo lo que dijiste..."):
+                text, err = transcribe_audio(audio_bytes)
+            if err:
+                st.error(err)
+            elif text:
+                auto_prompt = text
+            else:
+                st.warning("No entendí lo que dijiste, intenta de nuevo más cerca del micrófono.")
 
     for m in get_chat(profile["id"],30):
         with st.chat_message("assistant" if m["role"]=="assistant" else "user"):st.markdown(m["content"])
-    prompt=st.chat_input("Pregunta sobre comida...")
+
+    typed_prompt = st.chat_input("...o escribe tu pregunta sobre comida")
+    prompt = auto_prompt or typed_prompt
+
     if prompt:
-        with st.chat_message("user"):st.markdown(prompt)
+        with st.chat_message("user"):
+            if auto_prompt:st.caption("🎤 dictado por voz")
+            st.markdown(prompt)
         try:ans=ksc_chat(profile,prompt)
         except Exception as e:ans="No pude responder ahora mismo: "+str(e)
         add_chat(profile["id"],"user",prompt);add_chat(profile["id"],"assistant",ans)
         with st.chat_message("assistant"):
             st.markdown(ans)
-            voice_reader_component(ans, autoplay=voice_on, key=f"chat_tts_{len(get_chat(profile['id']))}")
+            speak_reply(ans, key=f"chat_tts_{len(get_chat(profile['id']))}", autoplay=voice_on)
     st.markdown("### 🧠 Memoria alimentaria")
     for m in memories(profile["id"]):st.write("•",m)
 
@@ -1844,12 +1875,16 @@ elif page=="🍳 Cocina inteligente":
                 try:
                     with st.spinner("Analizando tu foto..."):
                         d=ai_json(FRIDGE_PROMPT,compact_jpeg(pic.getvalue()))
-                    st.session_state["fridge"]=d.get("ingredients",[])
+                    raw_ing = d.get("ingredients",[]) if isinstance(d, dict) else []
+                    if not isinstance(raw_ing, list):
+                        raw_ing = [raw_ing]
+                    clean_ing = [str(x).strip() for x in raw_ing if x is not None and str(x).strip()]
+                    st.session_state["fridge"]=clean_ing
                     if not st.session_state["fridge"]:
                         st.warning("No pude identificar ingredientes claros en esta foto. Prueba con más luz o escribe manualmente abajo.")
                 except Exception as e:
                     st.error(f"No pude analizar la foto: {e}")
-        detected=st.session_state.get("fridge",[])
+        detected=[str(x) for x in st.session_state.get("fridge",[]) if x is not None]
         if detected:st.write("Detectados en la foto:",", ".join(detected))
         if st.button("🍳 Crear recetas con esto",type="primary",use_container_width=True):
             if not text.strip() and not detected:
@@ -1897,10 +1932,11 @@ elif page=="📅 Plan semanal":
     if plan:
         days=plan.get("days",[]);st.dataframe(pd.DataFrame(days),hide_index=True,use_container_width=True)
         st.markdown("### 🛒 Lista de compras")
-        for x in plan.get("shopping_list",[]):st.write("•",x)
+        shopping = [str(x) for x in (plan.get("shopping_list",[]) or []) if x is not None]
+        for x in shopping:st.write("•",x)
         c1,c2=st.columns(2)
         if c1.button("Guardar plan"):save_plan(profile["id"],week,plan);st.success("Guardado")
-        html="<html><body><h1>Plan semanal IA KSC</h1>"+pd.DataFrame(days).to_html(index=False)+"<h2>Compras</h2><ul>"+"".join(f"<li>{x}</li>" for x in plan.get("shopping_list",[]))+"</ul></body></html>"
+        html="<html><body><h1>Plan semanal IA KSC</h1>"+pd.DataFrame(days).to_html(index=False)+"<h2>Compras</h2><ul>"+"".join(f"<li>{x}</li>" for x in shopping)+"</ul></body></html>"
         c2.download_button("🖨️ Exportar HTML",html.encode(),file_name="plan_IA_KSC.html",mime="text/html",use_container_width=True)
 
 # ============================================================
@@ -2162,8 +2198,8 @@ elif page=="⚙️ Configuración":
         except Exception as e:st.error(str(e))
     st.markdown("### 💪 Arena Push-Up (cámara con esqueleto)")
     st.code("pip install streamlit-webrtc mediapipe av opencv-python-headless",language="powershell")
-    st.markdown("### 🔊 Voz (gratis, sin API key)")
-    st.caption("El chat usa la Web Speech API del navegador (Chrome recomendado) para leer respuestas y dictar por micrófono. No requiere ElevenLabs ni ninguna clave.")
+    st.markdown("### 🔊 Voz realista (gratis)")
+    st.caption("Para hablar, IA KSC usa Edge TTS (voces neuronales de Microsoft, gratis y sin API key) — elige la voz en la barra lateral. Para escucharte, usa Whisper a través de tu misma GROQ_API_KEY: grabas con el micrófono del navegador (st.audio_input) y se transcribe y envía automáticamente, sin copiar ni pegar nada. No usa ElevenLabs.")
     st.markdown("### 🔎 Código de barras")
     st.caption("Usa la base pública y gratuita Open Food Facts. Los productos consultados se guardan en caché local (.ksc_data/barcode_cache.json) para funcionar más rápido la próxima vez.")
     st.markdown("### 💾 Persistencia de datos")
