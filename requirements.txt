@@ -1,17 +1,18 @@
-# ============================================================
-# IA KSC / NutriVision — requirements.txt
-# ============================================================
-
-# --- Núcleo de la app ---
+# --- Núcleo obligatorio (sin esto la app no arranca) ---
 streamlit>=1.38
-pandas>=2.2
-requests>=2.31
-Pillow>=10.3
-groq>=0.9
+pandas
+requests
+Pillow
+groq
 
-# --- Push-Up Arena (cámara + detección de pose) ---
-streamlit-webrtc>=0.47
-mediapipe>=0.10
-av>=11.0
-opencv-python-headless>=4.9
-aiortc>=1.9
+# --- Voz realista gratis (Edge TTS para hablar) ---
+# Si falta, la app sigue funcionando pero sin audio de voz.
+edge-tts>=6.1.9
+
+# --- Arena Push-Up con esqueleto en cámara (opcional) ---
+# Si falta, esa pestaña muestra un registro manual en vez de la cámara en vivo.
+streamlit-webrtc
+mediapipe
+av
+opencv-python-headless
+aiortc
