@@ -21,11 +21,10 @@ from PIL import Image, ImageOps
 from groq import Groq, AuthenticationError, RateLimitError, APIConnectionError, BadRequestError
 
 # ============================================================
-# IA KSC / NutriVision MGP — V6.0 (rediseño)
-# EUREKA 2026
+# IA KSC / NutriVision — V7.0
 # ============================================================
 
-APP_VERSION = "6.0"
+APP_VERSION = "7.0"
 AI_MODEL = "qwen/qwen3.6-27b"
 USDA_BASE = "https://api.nal.usda.gov/fdc/v1"
 OFF_BASE = "https://world.openfoodfacts.org/api/v2/product"
@@ -75,284 +74,101 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 :root{
- --bg:#060f0b;--panel:#0b1b13;--panel2:#0e2117;--line:rgba(255,255,255,.09);
- --text:#f4fff8;--muted:#9cb7a8;--green:#56f09f;--green2:#22c98a;--yellow:#ffd166;
- --blue:#6ab8ff;--purple:#b28dff;--orange:#ff9d5c;--red:#ff6b7a;
- --radius:20px;--ease:cubic-bezier(.16,1,.3,1);
+ --bg:#070b10;--bg2:#0b1118;--glass:rgba(255,255,255,.075);--glass-strong:rgba(255,255,255,.105);
+ --glass-dark:rgba(8,13,20,.58);--line:rgba(255,255,255,.13);--line-soft:rgba(255,255,255,.08);
+ --text:#f7f9fc;--muted:#a8b2c1;--green:#69f2a5;--green2:#29d78e;--blue:#7db8ff;
+ --yellow:#ffd66e;--orange:#ffab73;--purple:#c09cff;--red:#ff7185;--radius:24px;
+ --ease:cubic-bezier(.16,1,.3,1);
 }
-*{ scrollbar-width:thin; scrollbar-color:rgba(86,240,159,.35) transparent; }
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.22) transparent}
 ::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:rgba(86,240,159,.35);border-radius:99px}
-::-webkit-scrollbar-thumb:hover{background:rgba(86,240,159,.55)}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:999px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28)}
+html,body,[class*="css"],.stApp{font-family:'Manrope','Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif}
+body{background:var(--bg)}
 
-html, body, [class*="css"], .stApp{
- font-family:'Manrope','Plus Jakarta Sans',-apple-system,sans-serif;
-}
-
-@keyframes fadeInUp{ from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
-@keyframes fadeIn{ from{opacity:0} to{opacity:1} }
-@keyframes floatSoft{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-@keyframes pulseGlow{
- 0%,100%{box-shadow:0 0 0 0 rgba(86,240,159,.35)}
- 50%{box-shadow:0 0 0 10px rgba(86,240,159,0)}
-}
-@keyframes flameFlicker{
- 0%,100%{transform:scale(1) rotate(-2deg)}
- 25%{transform:scale(1.08) rotate(2deg)}
- 50%{transform:scale(0.96) rotate(-1deg)}
- 75%{transform:scale(1.05) rotate(1deg)}
-}
-@keyframes gradientShift{
- 0%{background-position:0% 50%}
- 50%{background-position:100% 50%}
- 100%{background-position:0% 50%}
-}
-@keyframes popIn{
- 0%{opacity:0;transform:scale(.85)}
- 70%{transform:scale(1.03)}
- 100%{opacity:1;transform:scale(1)}
-}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(12px) scale(.992)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes shimmer{0%,100%{transform:translateX(-110%)}50%{transform:translateX(110%)}}
+@keyframes floatSoft{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(105,242,165,.2)}50%{box-shadow:0 0 0 8px rgba(105,242,165,0)}}
 
 .stApp{
- background:
- radial-gradient(circle at 8% 0%,rgba(86,240,159,.14),transparent 30%),
- radial-gradient(circle at 94% 5%,rgba(106,184,255,.09),transparent 24%),
- radial-gradient(circle at 50% 100%,rgba(178,141,255,.06),transparent 35%),
- linear-gradient(180deg,#060f0b 0%,#07150f 75%);
- animation:fadeIn .5s var(--ease);
+ min-height:100vh;background:
+ radial-gradient(circle at 8% 0%,rgba(90,190,255,.12),transparent 28%),
+ radial-gradient(circle at 96% 6%,rgba(105,242,165,.11),transparent 25%),
+ radial-gradient(circle at 50% 100%,rgba(150,110,255,.08),transparent 32%),
+ linear-gradient(180deg,#070b10 0%,#090d13 55%,#0b1017 100%);
+ animation:fadeIn .45s var(--ease);
 }
-.block-container{max-width:1320px;padding-top:1.1rem;padding-bottom:4rem}
-.block-container > div{ animation:fadeInUp .45s var(--ease) both; }
+.block-container{max-width:1340px;padding:1rem 1.1rem 4rem}
+.block-container>div{animation:fadeInUp .42s var(--ease) both}
 
-[data-testid="stSidebar"]{
- background:linear-gradient(180deg,#07140e,#091a12);
- border-right:1px solid var(--line);
+/* Liquid glass surfaces */
+.hero,.mini,.stat-card,.level-card,.lock,.community-card,.side-profile,.streak-card,.winner-banner,.water-alert,
+div[data-testid="stVerticalBlockBorderWrapper"],.glass-btn{
+ position:relative;overflow:hidden;background:linear-gradient(145deg,rgba(255,255,255,.09),rgba(255,255,255,.035));
+ border:1px solid var(--line);box-shadow:0 20px 55px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.08);
+ backdrop-filter:blur(22px) saturate(155%);-webkit-backdrop-filter:blur(22px) saturate(155%);
 }
-[data-testid="stSidebar"] *{color:#effff6}
-[data-testid="stSidebar"] [role="radiogroup"] label{
- border-radius:14px;padding:11px 14px;margin-bottom:5px;
- transition:all .22s var(--ease);
- border:1px solid transparent;font-size:1.02rem;
+.hero::before,.mini::before,.stat-card::before,.level-card::before,.community-card::before,.side-profile::before,.streak-card::before,.winner-banner::before{
+ content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(110deg,transparent 25%,rgba(255,255,255,.08) 48%,transparent 70%);
+ transform:translateX(-110%);animation:shimmer 10s ease-in-out infinite;opacity:.45
 }
-[data-testid="stSidebar"] [role="radiogroup"] label:hover{
- background:rgba(86,240,159,.10);border-color:rgba(86,240,159,.22);
- transform:translateX(3px);
-}
-[data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"],
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
- background:linear-gradient(90deg,rgba(86,240,159,.18),rgba(86,240,159,.03));
- border-color:rgba(86,240,159,.35);
- box-shadow:0 4px 14px rgba(86,240,159,.10);
-}
+.hero{padding:32px 34px;border-radius:30px;margin-bottom:18px}
+.hero-title{font-size:clamp(2.25rem,5vw,3.45rem);font-weight:900;line-height:.98;letter-spacing:-.055em;color:#fff;margin:14px 0 10px;position:relative;z-index:1}
+.hero-sub{color:#bec7d3;max-width:900px;font-size:1rem;line-height:1.6;position:relative;z-index:1}
+.badge{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:#eafef3;font-size:.78rem;font-weight:850;position:relative;z-index:1;box-shadow:inset 0 1px 0 rgba(255,255,255,.09)}
+.badge::before{content:"";width:7px;height:7px;border-radius:99px;background:var(--green);animation:pulseGlow 2s ease-in-out infinite}
+.green{background:linear-gradient(90deg,#7df6b3,#d3ffe4,#7df6b3);background-size:180% auto;-webkit-background-clip:text;background-clip:text;color:transparent}
+.kicker{font-size:.72rem;font-weight:900;letter-spacing:.12em;color:#9feac3}.big{font-size:1.48rem;font-weight:850;color:#fff;margin-top:4px}.note{font-size:.83rem;color:var(--muted);line-height:1.52;margin-top:4px}
 
-h1,h2,h3{letter-spacing:-.035em}
+.stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:8px 0 20px}
+.stat-card{border-radius:22px;padding:17px 17px 15px;transition:transform .25s var(--ease),border-color .25s var(--ease),box-shadow .25s var(--ease)}
+.stat-card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.22);box-shadow:0 24px 60px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.10)}
+.stat-card .icon{font-size:1.45rem;display:inline-block;animation:floatSoft 3.2s ease-in-out infinite}.stat-card .label{font-size:.68rem;font-weight:850;letter-spacing:.1em;text-transform:uppercase;color:#9ea8b8;margin-top:8px}.stat-card .value{font-size:1.7rem;font-weight:900;color:#fff;letter-spacing:-.035em;margin-top:2px}.stat-card .sub{font-size:.76rem;color:#929dab;margin-top:3px}
+.stat-card.accent-green{border-color:rgba(105,242,165,.20)}.stat-card.accent-blue{border-color:rgba(125,184,255,.20)}.stat-card.accent-purple{border-color:rgba(192,156,255,.20)}.stat-card.accent-orange{border-color:rgba(255,171,115,.20)}
 
-.hero{
- padding:34px 36px;border:1px solid var(--line);border-radius:28px;position:relative;overflow:hidden;
- background:radial-gradient(circle at 84% 18%,rgba(86,240,159,.19),transparent 28%),
- linear-gradient(135deg,rgba(17,44,29,.97),rgba(6,17,12,.98));
- box-shadow:0 24px 80px rgba(0,0,0,.28);margin-bottom:20px;
- animation:fadeInUp .55s var(--ease) both;
-}
-.hero::after{
- content:"";position:absolute;inset:0;pointer-events:none;
- background:linear-gradient(120deg,transparent 30%,rgba(86,240,159,.06) 50%,transparent 70%);
- background-size:220% 220%;animation:gradientShift 9s ease-in-out infinite;
-}
-.badge{
- display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;
- background:rgba(86,240,159,.09);border:1px solid rgba(86,240,159,.25);
- color:#87f6ba;font-size:.80rem;font-weight:850;position:relative;z-index:1;
-}
-.badge::before{
- content:"";width:7px;height:7px;border-radius:99px;background:var(--green);
- animation:pulseGlow 1.8s ease-in-out infinite;
-}
-.hero-title{font-size:3.3rem;font-weight:950;line-height:1;letter-spacing:-.055em;color:white;margin:15px 0 10px;position:relative;z-index:1}
-.green{
- background:linear-gradient(90deg,var(--green),#8bffce,var(--green));
- background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
- animation:gradientShift 4s linear infinite;
-}
-.hero-sub{color:#b8d3c4;max-width:920px;font-size:1.04rem;line-height:1.6;position:relative;z-index:1}
+.mini,.level-card,.lock,.community-card,.side-profile,.streak-card,.winner-banner,.water-alert,.glass-btn{border-radius:20px}
+.mini{height:100%;padding:16px;transition:transform .25s var(--ease),border-color .25s var(--ease)}.mini:hover,.community-card:hover{transform:translateY(-3px);border-color:rgba(255,255,255,.2)}
+.streak-card{display:flex;align-items:center;gap:12px;padding:13px 16px;background:rgba(255,171,115,.07);border-color:rgba(255,171,115,.22)}
+.streak-flame{font-size:2rem}.streak-days{font-size:1.45rem;font-weight:900;color:#ffd6bb;letter-spacing:-.03em;line-height:1}.streak-label{font-size:.75rem;color:#9aa4b2;font-weight:700;margin-top:2px}
+.level-card{padding:19px}.water-alert{padding:13px 15px;background:rgba(125,184,255,.075);border-color:rgba(125,184,255,.20)}.lock{padding:20px}
 
-.mini{
- height:100%;background:rgba(255,255,255,.025);border:1px solid var(--line);border-radius:18px;padding:17px;
- transition:transform .28s var(--ease),border-color .28s var(--ease),box-shadow .28s var(--ease);
-}
-.mini:hover{transform:translateY(-4px);border-color:rgba(86,240,159,.30);box-shadow:0 16px 40px rgba(0,0,0,.22)}
-
-.kicker{font-size:.74rem;font-weight:900;letter-spacing:.11em;color:#77ecab}
-.big{font-size:1.55rem;font-weight:900;color:white;margin-top:4px}
-.note{font-size:.84rem;color:var(--muted);line-height:1.5;margin-top:4px}
-
-.chip{
- display:inline-block;padding:6px 10px;margin:3px;border-radius:999px;
- background:rgba(86,240,159,.08);border:1px solid rgba(86,240,159,.18);font-size:.78rem;font-weight:800;
- transition:all .2s var(--ease);
-}
-.chip:hover{background:rgba(86,240,159,.16);transform:translateY(-1px)}
-
-.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:6px 0 22px}
-@media (max-width:900px){ .stat-grid{grid-template-columns:repeat(2,1fr)} }
-.stat-card{
- position:relative;overflow:hidden;border-radius:20px;padding:18px 18px 16px;
- background:linear-gradient(160deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
- border:1px solid var(--line);animation:popIn .5s var(--ease) both;
- transition:transform .25s var(--ease),box-shadow .25s var(--ease),border-color .25s var(--ease);
-}
-.stat-card:hover{transform:translateY(-5px) scale(1.015);box-shadow:0 18px 46px rgba(0,0,0,.30);border-color:rgba(86,240,159,.30)}
-.stat-card .icon{font-size:1.5rem;display:inline-block;animation:floatSoft 3.4s ease-in-out infinite}
-.stat-card .label{font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:8px}
-.stat-card .value{font-size:1.7rem;font-weight:950;color:white;letter-spacing:-.03em;margin-top:2px}
-.stat-card .sub{font-size:.78rem;color:var(--muted);margin-top:3px}
-.stat-card.accent-green{border-color:rgba(86,240,159,.22)}
-.stat-card.accent-blue{border-color:rgba(106,184,255,.22)}
-.stat-card.accent-purple{border-color:rgba(178,141,255,.22)}
-.stat-card.accent-orange{border-color:rgba(255,157,92,.22)}
-
-.streak-card{
- display:flex;align-items:center;gap:14px;padding:16px 20px;border-radius:20px;
- background:linear-gradient(120deg,rgba(255,157,92,.14),rgba(255,209,102,.05));
- border:1px solid rgba(255,157,92,.30);animation:popIn .55s var(--ease) both;
-}
-.streak-flame{font-size:2.1rem;animation:flameFlicker 1.6s ease-in-out infinite;filter:drop-shadow(0 0 10px rgba(255,157,92,.55))}
-.streak-days{font-size:1.6rem;font-weight:950;color:#ffcf9a;letter-spacing:-.03em;line-height:1}
-.streak-label{font-size:.78rem;color:var(--muted);font-weight:700;margin-top:2px}
-
-.level-card{
- padding:20px;border-radius:22px;
- background:linear-gradient(135deg,rgba(86,240,159,.10),rgba(178,141,255,.06));
- border:1px solid rgba(86,240,159,.20);position:relative;overflow:hidden;
- animation:fadeInUp .5s var(--ease) both;transition:transform .25s var(--ease);
-}
-.level-card:hover{transform:translateY(-3px)}
-
-.water-alert{
- padding:14px 16px;border-radius:16px;border:1px solid rgba(106,184,255,.28);
- background:rgba(106,184,255,.08);animation:fadeInUp .4s var(--ease) both;
-}
-.lock{padding:22px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);animation:fadeInUp .4s var(--ease) both}
-
-div[data-testid="stMetric"]{
- background:rgba(255,255,255,.028);border:1px solid var(--line);padding:14px 16px;border-radius:18px;
- transition:transform .25s var(--ease),border-color .25s var(--ease);
-}
-div[data-testid="stMetric"]:hover{transform:translateY(-3px);border-color:rgba(86,240,159,.28)}
+/* Streamlit controls */
+div[data-testid="stMetric"]{background:rgba(255,255,255,.055);border:1px solid var(--line-soft);padding:13px 15px;border-radius:18px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
 div[data-testid="stMetricValue"]{font-weight:900}
+.stButton>button{border-radius:15px!important;font-weight:800!important;font-size:.95rem!important;padding:.62rem 1rem!important;border:1px solid rgba(255,255,255,.12)!important;background:rgba(255,255,255,.07)!important;color:#f5f7fb!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 8px 22px rgba(0,0,0,.10)!important;transition:transform .18s var(--ease),background .18s var(--ease),box-shadow .18s var(--ease)!important}
+.stButton>button:hover{transform:translateY(-2px);background:rgba(255,255,255,.11)!important;box-shadow:0 13px 30px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.11)!important}
+button[kind="primary"]{background:linear-gradient(135deg,#36d994,#86f5bb)!important;color:#06150e!important;border-color:rgba(255,255,255,.32)!important;box-shadow:0 10px 30px rgba(41,215,142,.2),inset 0 1px 0 rgba(255,255,255,.46)!important}
+button[kind="primary"]:hover{filter:brightness(1.04)}
+.stTextInput>div>div>input,.stTextArea textarea,.stSelectbox>div>div,.stNumberInput input,.stDateInput input,.stFileUploader>div{border-radius:15px!important;border:1px solid rgba(255,255,255,.12)!important;background:rgba(255,255,255,.055)!important;color:#fff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.055)!important}
+.stTextInput input:focus,.stTextArea textarea:focus{border-color:rgba(105,242,165,.45)!important;box-shadow:0 0 0 3px rgba(105,242,165,.10)!important}
+.stTabs [data-baseweb="tab-list"]{gap:4px;background:rgba(255,255,255,.045);border:1px solid var(--line-soft);padding:4px;border-radius:16px}
+.stTabs [data-baseweb="tab"]{border-radius:12px!important;font-weight:750;transition:all .2s var(--ease)}
+.stTabs [aria-selected="true"]{background:rgba(255,255,255,.10)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+[data-testid="stDataFrame"]{border-radius:16px;overflow:hidden;border:1px solid var(--line-soft)}
+div[data-testid="stProgress"]{border-radius:99px;overflow:hidden;background:rgba(255,255,255,.06)}
+div[data-testid="stProgress"]>div>div{background:linear-gradient(90deg,#32d98e,#8bf7bd)!important;border-radius:99px!important}
 
-.stButton>button{
- border-radius:16px!important;font-weight:850!important;font-size:1.02rem!important;
- padding:.6rem 1.1rem!important;
- transition:transform .18s var(--ease),box-shadow .18s var(--ease),filter .18s var(--ease)!important;
-}
-.stButton>button:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(86,240,159,.18);filter:brightness(1.05)}
-.stButton>button:active{transform:translateY(0) scale(.98)}
-button[kind="primary"]{
- background:linear-gradient(90deg,var(--green2),var(--green))!important;
- background-size:180% auto!important;
-}
-button[kind="primary"]:hover{background-position:right center!important}
+/* Sidebar */
+[data-testid="stSidebar"]{background:linear-gradient(180deg,rgba(6,10,15,.94),rgba(8,13,19,.88));border-right:1px solid rgba(255,255,255,.10);backdrop-filter:blur(26px) saturate(140%);-webkit-backdrop-filter:blur(26px) saturate(140%)}
+[data-testid="stSidebar"] *{color:#f3f6fa}
+[data-testid="stSidebar"] .stRadio label{border-radius:13px;padding:9px 11px;margin-bottom:3px;border:1px solid transparent;font-size:.92rem;transition:all .18s var(--ease)}
+[data-testid="stSidebar"] .stRadio label:hover{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.08)}
+[data-testid="stSidebar"] .stRadio label:has(input:checked){background:linear-gradient(90deg,rgba(105,242,165,.13),rgba(255,255,255,.035));border-color:rgba(105,242,165,.24);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.brand-row{display:flex;align-items:center;gap:10px;margin-bottom:2px}.brand-icon{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#39d993,#7bc2ff);font-size:1.08rem;box-shadow:0 10px 26px rgba(56,217,147,.18)}
+.side-profile{padding:13px;margin-bottom:10px;text-align:center;background:rgba(255,255,255,.045)}.side-avatar{width:52px;height:52px;border-radius:99px;margin:0 auto 8px;object-fit:cover;border:2px solid rgba(255,255,255,.20)}
+.side-avatar-fallback{width:52px;height:52px;border-radius:99px;margin:0 auto 8px;background:linear-gradient(135deg,#39d993,#7bc2ff);display:flex;align-items:center;justify-content:center;font-weight:900;color:#06130d}
+.avatar-ring{width:86px;height:86px;border-radius:99px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#39d993,#7bc2ff);font-weight:900;font-size:1.7rem;color:#07150e;box-shadow:0 14px 32px rgba(56,217,147,.20);margin:0 auto 10px;border:3px solid rgba(255,255,255,.16)}
+.avatar-photo{width:86px;height:86px;border-radius:99px;object-fit:cover;display:block;margin:0 auto 10px;border:3px solid rgba(255,255,255,.20);box-shadow:0 14px 32px rgba(0,0,0,.25)}
 
-div[data-testid="stProgress"] > div > div{
- background:linear-gradient(90deg,var(--green2),var(--green),#8bffce)!important;
- background-size:200% auto!important;animation:gradientShift 3s linear infinite;
- border-radius:99px!important;
-}
-div[data-testid="stProgress"]{border-radius:99px;overflow:hidden}
+.unlock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:11px;margin-top:8px}.unlock-card{border-radius:17px;padding:13px;text-align:center;border:1px solid var(--line-soft);background:rgba(255,255,255,.04);transition:all .25s var(--ease)}.unlock-card.open{background:rgba(105,242,165,.085);border-color:rgba(105,242,165,.24)}.unlock-card.closed{opacity:.55;filter:grayscale(.2)}.unlock-card .uicon{font-size:1.8rem;display:block;margin-bottom:6px}.unlock-card .uname{font-size:.84rem;font-weight:800;color:#fff}.unlock-card .ureq{font-size:.71rem;color:var(--muted);margin-top:3px}
+.rank-row{display:flex;align-items:center;gap:12px;padding:10px 13px;border-radius:14px;margin-bottom:6px;background:rgba(255,255,255,.04);border:1px solid var(--line-soft);transition:transform .2s var(--ease)}.rank-row:hover{transform:translateX(2px)}.rank-pos{font-weight:900;font-size:1.03rem;min-width:28px}.rank-name{flex:1;font-weight:700}.rank-val{font-weight:900;color:var(--green)}
+footer,#MainMenu{visibility:hidden}
 
-div[data-testid="stVerticalBlockBorderWrapper"]{
- transition:transform .25s var(--ease),box-shadow .25s var(--ease);
- border-radius:18px!important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]:hover{transform:translateY(-2px)}
-
-.stTabs [data-baseweb="tab-list"]{gap:4px}
-.stTabs [data-baseweb="tab"]{border-radius:12px 12px 0 0!important;transition:all .2s var(--ease);font-weight:700}
-.stTabs [aria-selected="true"]{background:rgba(86,240,159,.10)!important}
-
-@media (max-width:768px){
- .hero{padding:24px 20px;border-radius:22px}
- .hero-title{font-size:2.1rem}
- .hero-sub{font-size:.92rem}
- .block-container{padding-top:.6rem}
- .stat-grid{grid-template-columns:repeat(2,1fr);gap:10px}
- .stat-card .value{font-size:1.35rem}
- .streak-card{padding:12px 16px}
-}
-
-footer{visibility:hidden}
-#MainMenu{visibility:hidden}
-
-.unlock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:8px}
-.unlock-card{
- border-radius:16px;padding:14px;text-align:center;border:1px solid var(--line);
- background:rgba(255,255,255,.02);transition:all .3s var(--ease);animation:popIn .45s var(--ease) both;
-}
-.unlock-card.open{background:linear-gradient(160deg,rgba(86,240,159,.14),rgba(86,240,159,.02));border-color:rgba(86,240,159,.35)}
-.unlock-card.open:hover{transform:translateY(-4px) scale(1.02);box-shadow:0 14px 34px rgba(86,240,159,.14)}
-.unlock-card.closed{opacity:.55;filter:grayscale(.35)}
-.unlock-card .uicon{font-size:1.8rem;display:block;margin-bottom:6px}
-.unlock-card .uname{font-size:.86rem;font-weight:800;color:white}
-.unlock-card .ureq{font-size:.72rem;color:var(--muted);margin-top:3px}
-
-.winner-banner{
- padding:20px 24px;border-radius:20px;text-align:center;margin:10px 0;
- background:linear-gradient(120deg,rgba(255,209,102,.16),rgba(86,240,159,.08));
- border:1px solid rgba(255,209,102,.35);animation:popIn .5s var(--ease) both;
-}
-.winner-banner .wtitle{font-size:1.5rem;font-weight:950;color:#ffe4a3}
-
-.avatar-ring{
- width:86px;height:86px;border-radius:99px;display:flex;align-items:center;justify-content:center;
- background:linear-gradient(135deg,var(--green2),var(--blue));font-weight:950;font-size:1.7rem;color:#04140c;
- box-shadow:0 8px 26px rgba(86,240,159,.25);margin:0 auto 10px;border:3px solid rgba(255,255,255,.12);
-}
-.avatar-photo{
- width:86px;height:86px;border-radius:99px;object-fit:cover;display:block;margin:0 auto 10px;
- border:3px solid rgba(86,240,159,.35);box-shadow:0 8px 26px rgba(0,0,0,.3);
-}
-
-.rank-row{
- display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:14px;margin-bottom:6px;
- background:rgba(255,255,255,.025);border:1px solid var(--line);transition:transform .2s var(--ease);
-}
-.rank-row:hover{transform:translateX(3px)}
-.rank-row.top1{background:linear-gradient(90deg,rgba(255,209,102,.14),transparent);border-color:rgba(255,209,102,.3)}
-.rank-row.top2{background:linear-gradient(90deg,rgba(200,210,220,.12),transparent);border-color:rgba(200,210,220,.25)}
-.rank-row.top3{background:linear-gradient(90deg,rgba(255,157,92,.12),transparent);border-color:rgba(255,157,92,.25)}
-.rank-pos{font-weight:950;font-size:1.05rem;min-width:28px}
-.rank-name{flex:1;font-weight:700}
-.rank-val{font-weight:900;color:var(--green)}
-
-.side-profile{
- padding:14px;border-radius:16px;background:rgba(86,240,159,.06);
- border:1px solid rgba(86,240,159,.18);text-align:center;margin-bottom:10px;
- animation:fadeInUp .4s var(--ease) both;
-}
-.side-avatar{width:52px;height:52px;border-radius:99px;margin:0 auto 8px;object-fit:cover;border:2px solid rgba(86,240,159,.4)}
-.side-avatar-fallback{
- width:52px;height:52px;border-radius:99px;margin:0 auto 8px;
- background:linear-gradient(135deg,var(--green2),var(--blue));
- display:flex;align-items:center;justify-content:center;font-weight:900;color:#04140c;
-}
-.brand-row{display:flex;align-items:center;gap:10px;margin-bottom:2px}
-.brand-icon{
- width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;
- background:linear-gradient(135deg,var(--green2),var(--blue));font-size:1.15rem;
- animation:floatSoft 3.6s ease-in-out infinite;
-}
-
-.glass-btn{
- border-radius:16px;padding:14px 8px;text-align:center;border:1px solid rgba(106,184,255,.25);
- background:rgba(106,184,255,.06);font-weight:800;font-size:.85rem;
-}
-
-.community-card{
- border-radius:18px;padding:14px;border:1px solid var(--line);background:rgba(255,255,255,.025);
- text-align:center;transition:transform .25s var(--ease);
-}
-.community-card:hover{transform:translateY(-4px)}
+@media (max-width:1000px){.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:700px){.block-container{padding:.55rem .7rem 3rem}.hero{padding:23px 19px;border-radius:24px}.hero-title{font-size:2.25rem}.hero-sub{font-size:.91rem}.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat-card{padding:14px}.stat-card .value{font-size:1.35rem}.stTabs [data-baseweb="tab"]{font-size:.82rem}.stButton>button{font-size:.9rem!important}.side-profile{display:block}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -438,11 +254,6 @@ def init_db():
       id INTEGER PRIMARY KEY AUTOINCREMENT, profile_id INTEGER NOT NULL,
       week_start TEXT NOT NULL, plan_json TEXT NOT NULL, created_at TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS plate_tests(
-      id INTEGER PRIMARY KEY AUTOINCREMENT, profile_id INTEGER,
-      created_at TEXT NOT NULL, predicted_foods TEXT, actual_foods TEXT,
-      correct INTEGER, avg_conf REAL, estimated_kcal REAL
-    );
     CREATE TABLE IF NOT EXISTS pushup_challenges(
       id INTEGER PRIMARY KEY AUTOINCREMENT, challenger_id INTEGER NOT NULL,
       opponent_id INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -465,7 +276,6 @@ def init_db():
     """)
     ensure_col(con, "profiles", "pin_hash TEXT DEFAULT ''")
     ensure_col(con, "profiles", "water_goal_ml INTEGER DEFAULT 2000")
-    ensure_col(con, "plate_tests", "app_version TEXT DEFAULT ''")
     ensure_col(con, "quiz_results", "level TEXT DEFAULT 'Básico'")
     con.commit()
     con.close()
@@ -555,7 +365,7 @@ def update_profile(pid,d):
 def delete_profile(pid):
     con=db()
     for t in ["weight_logs","measurements","chat_messages","memories","meal_diary","hydration",
-              "healthy_goals","point_events","favorites","recipe_ratings","weekly_plans","plate_tests","quiz_results"]:
+              "healthy_goals","point_events","favorites","recipe_ratings","weekly_plans","quiz_results"]:
         con.execute(f"DELETE FROM {t} WHERE profile_id=?",(pid,))
     con.execute("DELETE FROM pushup_attempts WHERE profile_id=?",(pid,))
     con.execute("DELETE FROM pushup_challenges WHERE challenger_id=? OR opponent_id=?",(pid,pid))
@@ -785,7 +595,7 @@ def system_prompt(p):
 Eres IA KSC, asistente nutricional educativo de NutriVision.
 
 Si preguntan qué es IA KSC o quién la diseñó, responde:
-"IA KSC es un asistente nutricional educativo diseñado por los alumnos César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena."
+"IA KSC es un asistente nutricional educativo creado por un equipo académico: César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena."
 No menciones al proveedor técnico salvo que pregunten expresamente por la infraestructura.
 
 SOLO HABLAS DE: alimentación, nutrición general, calorías, platos, porciones, recetas,
@@ -1019,7 +829,7 @@ def latest_plan(pid):
     return d
 
 # ============================================================
-# PESO / MEDIDAS / EUREKA
+# PESO / MEDIDAS
 # ============================================================
 
 def add_weight(pid,d,w,waist,note):
@@ -1040,15 +850,6 @@ def measures(pid):
     con=db();rows=con.execute("SELECT * FROM measurements WHERE profile_id=? ORDER BY log_date,id",(pid,)).fetchall();con.close()
     return [dict(r) for r in rows]
 
-def save_plate_test(pid,pred,actual,correct,conf,kcal):
-    con=db();con.execute("""INSERT INTO plate_tests(profile_id,created_at,predicted_foods,actual_foods,correct,avg_conf,estimated_kcal,app_version)
-                            VALUES(?,?,?,?,?,?,?,?)""",
-                         (pid,datetime.now().isoformat(timespec="seconds"),pred,actual,1 if correct else 0,conf,kcal,APP_VERSION))
-    con.commit();con.close()
-
-# ============================================================
-# CÓDIGO DE BARRAS (Open Food Facts, gratis, sin clave + caché local)
-# ============================================================
 
 def _load_barcode_cache():
     if BARCODE_CACHE_PATH.exists():
@@ -1351,7 +1152,7 @@ def hero(p=None):
         )
     st.markdown(
         '<div class="hero">'
-        '<span class="badge">● EUREKA 2026 · NUTRIVISION</span>'
+        '<span class="badge">● IA KSC · NUTRIVISION</span>'
         '<div class="hero-title">IA <span class="green">KSC</span></div>'
         '<div class="hero-sub">Tu diario nutricional completo: comidas, código de barras, chat por voz, retos físicos, comunidad y progreso — todo en un solo lugar.</div>'
         f'{extra}'
@@ -1410,31 +1211,26 @@ def need_profile(p):
 # SIDEBAR — MENÚ REORDENADO Y RENOMBRADO
 # ============================================================
 
-MENU = [
-    "🏠 Inicio",
-    "👤 Mi perfil",
-    "🌐 Comunidad",
-    "📷 Diario de comidas",
-    "🔎 Escáner de código de barras",
-    "🧾 Escáner de etiqueta",
-    "⚖️ Comparar platos",
-    "💬 Chat por voz con IA KSC",
-    "🍳 Cocina inteligente",
-    "📅 Plan semanal",
-    "💧 Agua & hábitos",
-    "🏆 Recompensas KSC",
-    "💪 Arena de Push-Ups",
-    "📈 Mi progreso",
-    "🎓 Academia KSC (quiz)",
-    "🧪 Eureka Lab",
-    "⚙️ Configuración",
-]
+PRIMARY_MENU = {
+    "🏠 Inicio": ["🏠 Inicio"],
+    "🍽️ Comidas": ["📷 Diario de comidas", "🔎 Escáner de código de barras", "🧾 Escáner de etiqueta", "⚖️ Comparar platos"],
+    "🤖 Coach IA": ["💬 Chat por voz con IA KSC", "🍳 Cocina inteligente", "📅 Plan semanal"],
+    "📈 Progreso": ["💧 Agua & hábitos", "🏆 Recompensas KSC", "💪 Arena de Push-Ups", "📈 Mi progreso", "🎓 Academia KSC (quiz)"],
+    "🌐 Comunidad": ["🌐 Comunidad"],
+    "👤 Perfil": ["👤 Mi perfil"],
+    "⚙️ Ajustes": ["⚙️ Configuración"],
+}
 
 with st.sidebar:
-    st.markdown('<div class="brand-row"><div class="brand-icon">🥗</div><div style="font-size:1.3rem;font-weight:950;color:white;letter-spacing:-.03em">IA KSC</div></div>',unsafe_allow_html=True)
+    st.markdown('<div class="brand-row"><div class="brand-icon">🥗</div><div style="font-size:1.22rem;font-weight:900;color:white;letter-spacing:-.03em">IA KSC</div></div>',unsafe_allow_html=True)
     st.caption(f"NutriVision · V{APP_VERSION}")
     st.markdown("---")
-    page=st.radio("Menú",MENU,label_visibility="collapsed")
+    primary=st.radio("Secciones",list(PRIMARY_MENU.keys()),label_visibility="collapsed")
+    choices=PRIMARY_MENU[primary]
+    if len(choices)>1:
+        page=st.radio("Contenido",choices,label_visibility="collapsed",key=f"subnav_{primary}")
+    else:
+        page=choices[0]
     st.markdown("---")
     profile=profile_selector()
 
@@ -1660,9 +1456,6 @@ elif page=="📷 Diario de comidas":
                     if st.button("Guardar en diario",type="primary",use_container_width=True):
                         ip=save_jpeg(st.session_state["mealjpeg"],MEAL_DIR,f"meal_{profile['id']}")
                         add_meal(profile["id"],mt,title,calc,tot,ip,note);st.success("+15 puntos guardados")
-                    pred=", ".join(x["name"] for x in calc);actual=st.text_input("Realmente había",pred);correct=st.radio("¿Acertó?",["Sí","No"],horizontal=True)=="Sí"
-                    if st.button("Guardar prueba Eureka"):
-                        conf=sum(x["confidence"] for x in calc)/len(calc);save_plate_test(profile["id"],pred,actual,correct,conf,tot["kcal"]);st.success("Guardada")
             elif res is not None:
                 st.info("No detecté alimentos claros en la foto. Prueba con más luz o más de cerca.")
     with tb:
@@ -2120,28 +1913,6 @@ elif page=="🎓 Academia KSC (quiz)":
             st.dataframe(pd.DataFrame([dict(r) for r in hist]),hide_index=True,use_container_width=True)
 
 # ============================================================
-# EUREKA LAB
-# ============================================================
-
-elif page=="🧪 Eureka Lab":
-    section("CIENCIA","Eureka Lab","Precisión, errores, versiones y matriz de confusión.")
-    con=db();df=pd.read_sql_query("""SELECT pt.*,p.name profile_name FROM plate_tests pt LEFT JOIN profiles p ON p.id=pt.profile_id ORDER BY pt.id""",con);con.close()
-    if df.empty:st.warning("Aún no hay pruebas.")
-    else:
-        st.markdown(textwrap.dedent(f"""
-        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
-          <div class="stat-card accent-green"><span class="icon">🧪</span><div class="label">Pruebas</div><div class="value">{len(df)}</div></div>
-          <div class="stat-card accent-blue"><span class="icon">🎯</span><div class="label">Precisión</div><div class="value">{df['correct'].mean()*100:.1f}%</div></div>
-          <div class="stat-card accent-purple"><span class="icon">📊</span><div class="label">Confianza</div><div class="value">{df['avg_conf'].mean():.1f}%</div></div>
-        </div>"""),unsafe_allow_html=True)
-        ver=df.groupby("app_version",dropna=False).agg(pruebas=("id","count"),precision=("correct","mean"),confianza=("avg_conf","mean")).reset_index();ver["precision"]*=100
-        st.markdown("### Versiones");st.dataframe(ver,hide_index=True,use_container_width=True)
-        pred=df["predicted_foods"].fillna("").str.split(",").str[0].str.strip();actual=df["actual_foods"].fillna("").str.split(",").str[0].str.strip()
-        st.markdown("### Matriz de confusión");st.dataframe(pd.crosstab(actual,pred,rownames=["Real"],colnames=["Predicción"]),use_container_width=True)
-        st.markdown("### Errores");st.dataframe(df[df["correct"]==0][["created_at","predicted_foods","actual_foods","avg_conf","app_version"]],hide_index=True,use_container_width=True)
-        st.download_button("Descargar CSV",df.to_csv(index=False).encode("utf-8-sig"),file_name="eureka_IA_KSC.csv",mime="text/csv")
-
-# ============================================================
 # CONFIG
 # ============================================================
 
@@ -2168,4 +1939,4 @@ elif page=="⚙️ Configuración":
     st.caption("Usa la base pública y gratuita Open Food Facts. Los productos consultados se guardan en caché local (.ksc_data/barcode_cache.json) para funcionar más rápido la próxima vez.")
     st.markdown("### 💾 Persistencia de datos")
     st.info("Todos los perfiles, comidas, puntos y retos se guardan en .ksc_data/ dentro del servidor donde corre la app. No se borran al cerrar el navegador. Si despliegas en un hosting con almacenamiento temporal, monta un volumen persistente en esa carpeta.")
-    st.info("IA KSC es un asistente nutricional educativo diseñado por los alumnos César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena.")
+    st.info("IA KSC es un asistente nutricional educativo creado por un equipo académico: César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena.")
