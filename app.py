@@ -400,7 +400,17 @@ def db():
 def cols(con, table):
     return {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
 
-def ensure_col(con, table, definition):
+def ensure_col(con, table, definition=None):
+    """Safely add a missing SQLite column.
+
+    Backward compatible with the old two-argument migration call used by
+    earlier deployments: ensure_col(con, "column TYPE ..."). In that case
+    the target table defaults to profiles because those legacy migrations
+    only referred to profile fields.
+    """
+    if definition is None:
+        definition = table
+        table = "profiles"
     name = definition.split()[0]
     if name not in cols(con, table):
         con.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
@@ -497,7 +507,7 @@ def init_db():
     """)
     ensure_col(con, "profiles", "pin_hash TEXT DEFAULT ''")
     ensure_col(con, "profiles", "water_goal_ml INTEGER DEFAULT 2000")
-    ensure_col(con,  "app_version TEXT DEFAULT ''")
+    ensure_col(con, "profiles", "app_version TEXT DEFAULT ''")
     ensure_col(con, "quiz_results", "level TEXT DEFAULT 'Básico'")
     ensure_col(con, "profiles", "diet_style TEXT DEFAULT 'Omnívora'")
     ensure_col(con, "profiles", "intolerances TEXT DEFAULT ''")
