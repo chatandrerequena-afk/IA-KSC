@@ -6,7 +6,6 @@ import math
 import time
 import base64
 import hashlib
-import html
 import secrets as pysecrets
 import sqlite3
 import threading
@@ -22,10 +21,10 @@ from PIL import Image, ImageOps
 from groq import Groq, AuthenticationError, RateLimitError, APIConnectionError, BadRequestError
 
 # ============================================================
-# FitGlass / NutriVision — Liquid Glass Edition
+# IA KSC / NutriVision MGP — Liquid Glass Edition
 # ============================================================
 
-APP_VERSION = "8.0"
+APP_VERSION = "7.2"
 AI_MODEL = "qwen/qwen3.6-27b"
 USDA_BASE = "https://api.nal.usda.gov/fdc/v1"
 OFF_BASE = "https://world.openfoodfacts.org/api/v2/product"
@@ -49,7 +48,7 @@ for d in (DATA_DIR, PROFILE_DIR, MEAL_DIR, PUSHUP_DIR, MODEL_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 st.set_page_config(
-    page_title="FitGlass · NutriVision",
+    page_title="IA KSC · NutriVision",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
@@ -401,17 +400,7 @@ def db():
 def cols(con, table):
     return {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
 
-def ensure_col(con, table, definition=None):
-    """Safely add a missing SQLite column.
-
-    Backward compatible with the old two-argument migration call used by
-    earlier deployments: ensure_col(con, "column TYPE ..."). In that case
-    the target table defaults to profiles because those legacy migrations
-    only referred to profile fields.
-    """
-    if definition is None:
-        definition = table
-        table = "profiles"
+def ensure_col(con, table, definition):
     name = definition.split()[0]
     if name not in cols(con, table):
         con.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
@@ -508,7 +497,7 @@ def init_db():
     """)
     ensure_col(con, "profiles", "pin_hash TEXT DEFAULT ''")
     ensure_col(con, "profiles", "water_goal_ml INTEGER DEFAULT 2000")
-    ensure_col(con, "profiles", "app_version TEXT DEFAULT ''")
+    ensure_col(con,  "app_version TEXT DEFAULT ''")
     ensure_col(con, "quiz_results", "level TEXT DEFAULT 'Básico'")
     ensure_col(con, "profiles", "diet_style TEXT DEFAULT 'Omnívora'")
     ensure_col(con, "profiles", "intolerances TEXT DEFAULT ''")
@@ -516,9 +505,6 @@ def init_db():
     ensure_col(con, "profiles", "protein_target REAL DEFAULT 0")
     ensure_col(con, "profiles", "carbs_target REAL DEFAULT 0")
     ensure_col(con, "profiles", "fat_target REAL DEFAULT 0")
-    ensure_col(con, "profiles", "region TEXT DEFAULT 'Perú'")
-    ensure_col(con, "profiles", "notes TEXT DEFAULT ''")
-    ensure_col(con, "profiles", "reminders_enabled INTEGER DEFAULT 1")
     con.commit()
     con.close()
 
@@ -584,8 +570,6 @@ def create_profile(d):
         d.get("carbs_target",0),d.get("fat_target",0)
     ))
     pid=cur.lastrowid
-    con.execute("UPDATE profiles SET region=?, notes=?, reminders_enabled=? WHERE id=?",
-                (d.get("region","Perú"),d.get("notes",""),int(d.get("reminders_enabled",1)),pid))
     con.execute("INSERT INTO weight_logs(profile_id,log_date,weight_kg,note) VALUES(?,?,?,?)",
                 (pid,str(date.today()),d["weight_kg"],"Peso inicial"))
     con.commit();con.close()
@@ -599,14 +583,14 @@ def update_profile(pid,d):
        name=?,age=?,sex_energy=?,height_cm=?,weight_kg=?,activity=?,goal=?,
        favorite_foods=?,favorite_fruits=?,favorite_vegetables=?,avoid_foods=?,
        allergies=?,special_state=?,photo_path=?,water_goal_ml=?,diet_style=?,intolerances=?,
-       calorie_target=?,protein_target=?,carbs_target=?,fat_target=?,region=?,notes=?,reminders_enabled=?
+       calorie_target=?,protein_target=?,carbs_target=?,fat_target=?
       WHERE id=?
     """,(
         d["name"],d["age"],d["sex_energy"],d["height_cm"],d["weight_kg"],d["activity"],d["goal"],
         d.get("favorite_foods",""),d.get("favorite_fruits",""),d.get("favorite_vegetables",""),d.get("avoid_foods",""),
         d.get("allergies",""),d.get("special_state","Ninguno"),d.get("photo_path",""),d.get("water_goal_ml",2000),
         d.get("diet_style","Omnívora"),d.get("intolerances",""),d.get("calorie_target",0),d.get("protein_target",0),
-        d.get("carbs_target",0),d.get("fat_target",0),d.get("region","Perú"),d.get("notes",""),int(d.get("reminders_enabled",1)),pid
+        d.get("carbs_target",0),d.get("fat_target",0),pid
     ))
     con.commit();con.close()
     sync_community()
@@ -696,45 +680,15 @@ def level_info(pid):
         elif nxt is None: nxt=l;break
     return pts,cur,nxt
 
-def water_amount_on(pid, d):
-    con=db(); r=con.execute("SELECT COALESCE(SUM(ml),0) ml FROM hydration WHERE profile_id=? AND log_date=?",(pid,str(d))).fetchone(); con.close(); return int(r["ml"])
-
-def streak_status(pid, d=None):
-    d=d or date.today(); totals,meals=day_totals(pid,d); water=water_amount_on(pid,d); p=get_profile(pid); e=energy_estimate(p) if p else {}
-    target=float(e.get("target",0) or 0); prot_target=float(e.get("protein_target",0) or 0); water_goal=float((p or {}).get("water_goal_ml",2000) or 2000)
-    active=bool(meals or water>0)
-    kcal_ok=bool(target and totals["kcal"]>=target*.90 and totals["kcal"]<=target*1.10)
-    protein_ok=prot_target<=0 or totals["protein"]>=prot_target*.90
-    water_ok=water>=water_goal*.90
-    nutrition=bool(meals) and kcal_ok and protein_ok and water_ok
-    perfect=bool(meals) and kcal_ok and protein_ok and water_ok and totals["fiber"]>=8
-    return {"active":active,"nutrition":nutrition,"perfect":perfect,"kcal_ok":kcal_ok,"protein_ok":protein_ok,"water_ok":water_ok,"kcal":totals["kcal"],"target":target,"water":water,"water_goal":water_goal}
-
-def current_streak(pid, kind="active"):
-    d=date.today(); n=0
-    while True:
-        stt=streak_status(pid,d); ok=stt["active"] if kind=="active" else (stt["perfect"] if kind=="perfect" else stt["nutrition"])
-        if not ok:
-            if n==0 and d==date.today(): d-=timedelta(days=1); continue
-            break
-        n+=1; d-=timedelta(days=1)
+def streak(pid):
+    con=db();rows=con.execute("SELECT DISTINCT event_date FROM point_events WHERE profile_id=? ORDER BY event_date DESC",(pid,)).fetchall();con.close()
+    dates={date.fromisoformat(r["event_date"]) for r in rows}
+    if not dates:return 0
+    d=date.today()
+    if d not in dates and d-timedelta(days=1) in dates:d-=timedelta(days=1)
+    n=0
+    while d in dates:n+=1;d-=timedelta(days=1)
     return n
-
-def streak(pid): return current_streak(pid,"active")
-
-def usage_days(pid):
-    con=db(); dates=set()
-    for table,col in (("meal_diary","meal_date"),("hydration","log_date"),("point_events","event_date")):
-        rows=con.execute(f"SELECT DISTINCT {col} d FROM {table} WHERE profile_id=?",(pid,)).fetchall(); dates.update(str(r["d"]) for r in rows if r["d"])
-    con.close(); return dates
-
-def streak_calendar(pid, days=35):
-    end=date.today(); start=end-timedelta(days=days-1); out=[]; d=start
-    while d<=end:
-        stt=streak_status(pid,d); status="perfect" if stt["perfect"] else "nutrition" if stt["nutrition"] else "active" if stt["active"] else "empty"
-        out.append({"date":d,"status":status})
-        d+=timedelta(days=1)
-    return out
 
 def leaderboard():
     con=db()
@@ -795,93 +749,30 @@ def complete_goal(gid,pid):
 # ============================================================
 
 def energy_estimate(p):
-    """Estimate daily energy and always expose stored onboarding targets to the dashboard."""
-    if not p:
-        return {"enabled":False,"reason":"Sin perfil.","target":0,"protein_target":0,"carbs_target":0,"fat_target":0}
-    stored_target=num(p.get("calorie_target"))
-    stored_protein=num(p.get("protein_target"))
-    stored_carbs=num(p.get("carbs_target"))
-    stored_fat=num(p.get("fat_target"))
-    age=int(p.get("age",0) or 0)
-    if age < 18:
-        return {"enabled":False,"reason":"En menores de 18 años FitGlass no fija déficit, superávit ni metas calóricas para cambiar de peso.",
-                "target":stored_target,"protein_target":stored_protein,"carbs_target":stored_carbs,"fat_target":stored_fat}
+    if not p:return {"enabled":False,"reason":"Sin perfil."}
+    if int(p["age"])<18:
+        return {"enabled":False,"reason":"En menores de 18 años IA KSC no fija déficit, superávit ni metas calóricas para cambiar de peso."}
     if p.get("special_state") in ("Embarazo","Lactancia"):
-        return {"enabled":False,"reason":"En embarazo o lactancia la meta energética debe definirse con seguimiento profesional.",
-                "target":stored_target,"protein_target":stored_protein,"carbs_target":stored_carbs,"fat_target":stored_fat}
+        return {"enabled":False,"reason":"En embarazo o lactancia no se fija una meta calórica personalizada."}
     sex=p.get("sex_energy")
-    w=float(p.get("weight_kg") or 0); h=float(p.get("height_cm") or 0)
-    if sex not in ("Masculino","Femenino") or not h or not w or not age:
-        if stored_target > 0:
-            return {"enabled":True,"maintenance":0,"target_low":stored_target,"target_high":stored_target,
-                    "target":round(stored_target),"bmi":round(w/((h/100)**2),1) if h else 0,
-                    "protein_target":round(stored_protein),"carbs_target":round(stored_carbs),"fat_target":round(stored_fat),
-                    "estimated":True,"reason":"Referencia basada en los datos registrados; falta una variable fisiológica para calcular el mantenimiento con Mifflin-St Jeor."}
-        return {"enabled":False,"reason":"Selecciona la variable fisiológica usada por la ecuación para estimar energía.",
-                "target":0,"protein_target":0,"carbs_target":0,"fat_target":0}
-    bmr=10*w+6.25*h-5*age+(5 if sex=="Masculino" else -161)
+    if sex not in ("Masculino","Femenino"):
+        return {"enabled":False,"reason":"Selecciona la variable fisiológica usada por la ecuación para estimar energía."}
+    w=float(p["weight_kg"]);h=float(p["height_cm"]);a=int(p["age"])
+    bmr=10*w+6.25*h-5*a+(5 if sex=="Masculino" else -161)
     maintenance=bmr*ACTIVITY_FACTORS.get(p.get("activity"),1.375)
     goal=p.get("goal")
-    if goal=="Perder peso": low,high=maintenance-400,maintenance-250
-    elif goal in ("Ganar peso","Ganar masa muscular"): low,high=maintenance+150,maintenance+300
-    else: low,high=maintenance-100,maintenance+100
-    low=max(1200,low); high=max(low,high)
-    target=stored_target if stored_target>0 else (low+high)/2
+    if goal=="Perder peso":low,high=maintenance-400,maintenance-250
+    elif goal in ("Ganar peso","Ganar masa muscular"):low,high=maintenance+150,maintenance+300
+    else:low,high=maintenance-100,maintenance+100
+    low=max(1200,low);high=max(low,high)
+    manual=num(p.get("calorie_target"))
+    target=manual if manual>0 else (low+high)/2
     bmi=w/((h/100)**2)
-    protein=stored_protein if stored_protein>0 else (w*1.6 if goal in ("Perder peso","Ganar masa muscular") else w*1.2)
-    fat=stored_fat if stored_fat>0 else (target*0.28/9)
-    carbs=stored_carbs if stored_carbs>0 else max(0,(target-protein*4-fat*9)/4)
+    protein=num(p.get("protein_target")) or (w*1.6 if goal in ("Perder peso","Ganar masa muscular") else w*1.2)
+    fat=num(p.get("fat_target")) or (target*0.28/9)
+    carbs=num(p.get("carbs_target")) or max(0,(target-protein*4-fat*9)/4)
     return {"enabled":True,"maintenance":round(maintenance),"target_low":round(low),"target_high":round(high),
-            "target":round(target),"bmi":round(bmi,1),"protein_target":round(protein),"carbs_target":round(carbs),
-            "fat_target":round(fat),"estimated":stored_target<=0}
-def calculate_targets(sex, age, height_cm, weight_kg, activity, goal):
-    """Estimate daily energy and macro targets using the same logic as energy_estimate()."""
-    age=int(age); h=float(height_cm); w=float(weight_kg)
-    if age < 18 or sex not in ("Masculino", "Femenino") or not h or not w:
-        # Safe neutral fallback. The profile can still be completed and targets edited later.
-        target=max(1200, round(w * 24))
-        protein=round(w * (1.4 if goal in ("Perder peso","Ganar masa muscular") else 1.2))
-        fat=round(target * 0.28 / 9)
-        carbs=max(0, round((target - protein*4 - fat*9) / 4))
-        return target, protein, carbs, fat
-    bmr=10*w + 6.25*h - 5*age + (5 if sex=="Masculino" else -161)
-    maintenance=bmr*ACTIVITY_FACTORS.get(activity,1.375)
-    if goal=="Perder peso":
-        low,high=maintenance-400,maintenance-250
-    elif goal in ("Ganar peso","Ganar masa muscular"):
-        low,high=maintenance+150,maintenance+300
-    else:
-        low,high=maintenance-100,maintenance+100
-    low=max(1200,low); high=max(low,high)
-    target=round((low+high)/2)
-    protein=round(w*(1.6 if goal in ("Perder peso","Ganar masa muscular") else 1.2))
-    fat=round(target*0.28/9)
-    carbs=max(0,round((target-protein*4-fat*9)/4))
-    return target, protein, carbs, fat
-
-def ensure_profile_targets(pid):
-    """Backfill old profiles so the dashboard never renders 0/0 references."""
-    p=get_profile(pid)
-    if not p or p.get("special_state") in ("Embarazo","Lactancia"):
-        return p
-    try:
-        needs=any(num(p.get(k))<=0 for k in ("calorie_target","protein_target","carbs_target","fat_target"))
-        if needs:
-            kcal,prot,carbs,fat=calculate_targets(p.get("sex_energy"),int(p.get("age") or 0),float(p.get("height_cm") or 0),float(p.get("weight_kg") or 0),p.get("activity"),p.get("goal"))
-            con=db();con.execute("UPDATE profiles SET calorie_target=?,protein_target=?,carbs_target=?,fat_target=? WHERE id=?",(kcal,prot,carbs,fat,pid));con.commit();con.close()
-            p=get_profile(pid)
-    except Exception:
-        pass
-    return p
-
-def personalized_plan_summary(p):
-    e=energy_estimate(p)
-    if not e.get("enabled"):
-        return f"{p["name"]}, tu perfil está listo. {e.get("reason","Para este caso no fijaré una meta calórica automática.")}"
-    return (f"{p["name"]}, tu punto de partida es de aproximadamente {e["maintenance"]} kcal para mantener tu gasto estimado. "
-            f"Para tu objetivo de {p["goal"].lower()}, la referencia diaria queda en torno a {e["target"]} kcal, "
-            f"con {e["protein_target"]} gramos de proteína, {e["carbs_target"]} gramos de carbohidratos y {e["fat_target"]} gramos de grasa. "
-            f"Tu agua objetivo es {int(p.get("water_goal_ml") or 2000)} ml. Esto es una estimación basada en tus datos; tu gasto real puede variar.")
+            "target":round(target),"bmi":round(bmi,1),"protein_target":round(protein),"carbs_target":round(carbs),"fat_target":round(fat)}
 
 def memories(pid,limit=12):
     con=db();rows=con.execute("SELECT memory FROM memories WHERE profile_id=? ORDER BY id DESC LIMIT ?",(pid,limit)).fetchall();con.close()
@@ -916,7 +807,6 @@ Evita/no le gustan: {p.get('avoid_foods','')}
 Alergias/restricciones: {p.get('allergies','')}
 Estado especial: {p.get('special_state','Ninguno')}
 Patrón alimentario: {p.get('diet_style','Omnívora')}
-Región del Perú: {p.get('region','Perú')}
 Intolerancias: {p.get('intolerances','')}
 Meta calórica manual (0 = automática): {p.get('calorie_target',0)}
 Meta de proteína: {p.get('protein_target',0)} g/día
@@ -945,17 +835,17 @@ def ai_client(key):
 
 def system_prompt(p):
     return f"""
-Eres FitGlass, asistente nutricional educativo de NutriVision.
+Eres IA KSC, asistente nutricional educativo de NutriVision.
 
-Si preguntan qué es FitGlass o quién la diseñó, responde:
-"FitGlass es un asistente nutricional educativo. Encargados actuales: Requena Núñez Juan Carlos, André y Atarama Sebastián. Créditos del proyecto: César y Alexander."
-No menciones proveedores técnicos, modelos o claves salvo que pregunten expresamente por la infraestructura. Mantén un tono elegante, sereno y preciso, sin emojis. Puedes hacer un chiste breve y limpio ocasionalmente.
+Si preguntan qué es IA KSC o quién la diseñó, responde:
+"IA KSC es un asistente nutricional educativo diseñado por los alumnos César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena."
+No menciones al proveedor técnico salvo que pregunten expresamente por la infraestructura.
 
 SOLO HABLAS DE: alimentación, nutrición general, calorías, platos, porciones, recetas,
 jugos, postres, frutas, verduras, etiquetas, códigos de barra, compras, preparación y hábitos alimentarios.
-Si cambian de tema, responde brevemente que FitGlass se especializa en alimentación.
+Si cambian de tema, responde brevemente que IA KSC se especializa en alimentación.
 
-Usa siempre el perfil. Respeta alergias, gustos y alimentos evitados. Usa la región del Perú para contextualizar platos y disponibilidad, pero nunca conviertas un dato poblacional de una región en una predicción individual. No afirmes que ciertos alimentos son los más consumidos salvo que exista una fuente estadística; puedes tratarlos como referencias gastronómicas.
+Usa siempre el perfil. Respeta alergias, gustos y alimentos evitados.
 Puedes crear recetas, planes, alternativas y listas de compras.
 Calorías siempre aproximadas cuando no exista peso real.
 Responde completo: no cortes tu respuesta a la mitad, termina siempre la idea.
@@ -977,32 +867,6 @@ def add_chat(pid,role,content):
     con=db();con.execute("INSERT INTO chat_messages(profile_id,role,content,created_at) VALUES(?,?,?,?)",
                          (pid,role,content,datetime.now().isoformat(timespec="seconds")));con.commit();con.close()
 
-PROFILE_EDIT_PROMPT="""Convierte la instrucción del usuario en cambios de perfil. Devuelve SOLO JSON con un objeto updates. Si pide añadir algo, conserva lo existente y agrega el nuevo elemento; no borres información salvo petición explícita.
-"""
-
-def apply_profile_updates(pid,updates):
-    p=get_profile(pid)
-    if not p:return []
-    allowed={"favorite_foods","favorite_fruits","favorite_vegetables","avoid_foods","allergies","intolerances","diet_style","region","notes","goal","activity","water_goal_ml","calorie_target","protein_target","carbs_target","fat_target","special_state"}
-    changes={}
-    for k,v in (updates or {}).items():
-        if k not in allowed: continue
-        if k in {"water_goal_ml","calorie_target","protein_target","carbs_target","fat_target"}:
-            try:v=float(v)
-            except:continue
-        if k in {"favorite_foods","favorite_fruits","favorite_vegetables","avoid_foods","allergies","intolerances"}:
-            oldv=str(p.get(k) or "").strip(); newv=str(v or "").strip(); parts=[x.strip() for x in oldv.split(",") if x.strip()]
-            if newv and newv not in parts:parts.append(newv)
-            v=", ".join(parts)
-        if str(p.get(k,""))!=str(v):changes[k]=v
-    if changes:
-        merged=dict(p); merged.update(changes); update_profile(pid,merged)
-    return sorted(changes)
-
-def ai_edit_profile(p,text):
-    data=ai_json(PROFILE_EDIT_PROMPT+"\nPERFIL ACTUAL:\n"+profile_context(p)+"\nINSTRUCCIÓN:\n"+text,max_tokens=1000)
-    return apply_profile_updates(p["id"],data.get("updates",{}))
-
 def ksc_chat(p,text):
     if not ai_key():raise RuntimeError("Falta GROQ_API_KEY.")
     msgs=[{"role":"system","content":system_prompt(p)}]+get_chat(p["id"],16)+[{"role":"user","content":text}]
@@ -1016,7 +880,7 @@ def ksc_chat(p,text):
         return ans
     except AuthenticationError as e:raise RuntimeError("La clave de IA no es válida.") from e
     except RateLimitError as e:raise RuntimeError("Límite gratuito temporal alcanzado.") from e
-    except APIConnectionError as e:raise RuntimeError("No se pudo conectar con FitGlass.") from e
+    except APIConnectionError as e:raise RuntimeError("No se pudo conectar con IA KSC.") from e
     except BadRequestError as e:raise RuntimeError(f"No se pudo procesar: {e}") from e
 
 def ai_json(prompt,jpeg=None,max_tokens=1800):
@@ -1033,9 +897,9 @@ def ai_json(prompt,jpeg=None,max_tokens=1800):
 VISION_PROMPT="""
 Analiza únicamente los alimentos y bebidas visibles.
 Devuelve SOLO JSON:
-{"dish_name_es":"...","summary":"...","total_estimated_grams":450,"foods":[{"name_es":"...","usda_query":"short generic English USDA query",
+{"summary":"...","foods":[{"name_es":"...","usda_query":"short generic English USDA query",
 "estimated_grams":120,"confidence":90,"preparation":"..."}],"limitations":["..."]}
-Máximo 6 alimentos. Los gramos son estimación visual de porción, no una báscula. Estima también el peso total del plato. Si no hay comida foods=[].
+Máximo 6 alimentos. Los gramos son solo estimación visual. Si no hay comida foods=[].
 """
 LABEL_PROMPT="""
 Lee la tabla nutricional visible. Devuelve SOLO JSON:
@@ -1070,7 +934,7 @@ def detect_foods(key,jpeg):
         except:c=0
         foods.append({"name_es":name[:90],"usda_query":query[:110],"estimated_grams":max(1,min(1500,g)),
                       "confidence":max(0,min(100,c)),"preparation":str(f.get("preparation",""))[:70]})
-    return {"dish_name":str(d.get("dish_name_es","Plato no identificado"))[:120],"summary":str(d.get("summary",""))[:300],"total_estimated_grams":max(0,int(num(d.get("total_estimated_grams",0)))),"foods":foods,
+    return {"summary":str(d.get("summary",""))[:300],"foods":foods,
             "limitations":[str(x)[:180] for x in d.get("limitations",[])[:5]]}
 
 # ============================================================
@@ -1475,122 +1339,42 @@ def eleven_tts(text, voice_id):
     r.raise_for_status()
     return r.content
 
-def render_ai_response(text, key="fitglass_ai", autoplay=True):
-    """Generate TTS first; only then reveal the assistant text and play audio together."""
-    clean=str(text or "").strip()
-    if not clean:return
-    audio=None
-    loading=st.empty()
-    loading.markdown("<div class='fg-ai-loading'><span class='fg-loader'></span><div><b>FitGlass está preparando tu respuesta</b><small>Generando voz y sincronizando la respuesta...</small></div></div>",unsafe_allow_html=True)
-    try:
-        audio=eleven_tts(clean,eleven_voice_id()) if eleven_key() else None
-    except Exception:
-        audio=None
-    loading.empty()
-    if not audio:
-        st.markdown(f"<div class='ai-message typing-fallback'>{html.escape(clean).replace(chr(10),'<br>')}</div>",unsafe_allow_html=True)
+def voice_reader_component(text, voice_hint="female", rate=1.0, autoplay=False, key="tts"):
+    if not eleven_key():
+        st.caption("Voz IA: configura ELEVENLABS_API_KEY en los secretos de Streamlit.")
         return
-    b64=base64.b64encode(audio).decode();safe_key=re.sub(r"[^a-zA-Z0-9_]","_",key);payload=json.dumps(clean,ensure_ascii=False)
-    components.html(f"""
-<div class='fg-ai-shell' id='fgai_{safe_key}'><div class='fg-ai-meta'><span class='fg-ai-dot'></span><span>FitGlass</span><button id='fgmute_{safe_key}'>Silenciar</button></div><div class='fg-ai-text' id='fgtext_{safe_key}'></div></div>
-<script>(function(){{const out=document.getElementById('fgtext_{safe_key}');const btn=document.getElementById('fgmute_{safe_key}');const text={payload};const audio=new Audio('data:audio/mp3;base64,{b64}');let muted=false;btn.onclick=()=>{{muted=!muted;audio.muted=muted;btn.textContent=muted?'Activar voz':'Silenciar';}};const parts=text.split(/(\\s+)/);let i=0;function type(){{if(i<parts.length){{out.insertAdjacentText('beforeend',parts[i]);i++;setTimeout(type,parts[i-1].trim()?20:0);}}}}if({str(bool(autoplay)).lower()}){{audio.play().catch(()=>{{}});}}type();}})();</script>
-<style>.fg-ai-loading{{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(135deg,rgba(255,255,255,.075),rgba(255,255,255,.025));backdrop-filter:blur(22px) saturate(165%);color:#e8f8ef;margin-bottom:8px}}.fg-ai-loading b{{display:block;color:#fff;font-size:13px}}.fg-ai-loading small{{display:block;color:#8eaa9c;font-size:11px;margin-top:3px}}.fg-loader{{width:20px;height:20px;border-radius:50%;border:2px solid rgba(255,255,255,.14);border-top-color:#7effbd;border-right-color:#8eb6ff;animation:fgspin .85s linear infinite}}@keyframes fgspin{{to{{transform:rotate(360deg)}}}}.fg-ai-shell{{position:relative;font-family:Manrope,-apple-system,BlinkMacSystemFont,sans-serif;padding:16px 18px;border-radius:20px;border:1px solid rgba(255,255,255,.13);background:linear-gradient(135deg,rgba(255,255,255,.095),rgba(255,255,255,.035));backdrop-filter:blur(26px) saturate(175%);box-shadow:0 20px 60px rgba(0,0,0,.2);color:#edf9f2}}.fg-ai-meta{{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:850;color:#b5cfc1}}.fg-ai-meta button{{margin-left:auto;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;border-radius:999px;padding:6px 11px;font-weight:800;cursor:pointer}}.fg-ai-dot{{width:7px;height:7px;border-radius:50%;background:#7effbd;box-shadow:0 0 15px rgba(126,255,189,.85)}}.fg-ai-text{{margin-top:12px;font-size:14px;line-height:1.72;color:#f0faf4;white-space:pre-wrap}}</style>
-""",height=max(100,min(460,120+len(clean)//2)))
-
-def voice_reader_component(text, voice_hint="female", rate=1.0, autoplay=True, key="tts"):
-    render_ai_response(text,key=key,autoplay=autoplay)
+    try:
+        audio=eleven_tts(text, eleven_voice_id())
+        if audio:
+            st.audio(audio, format="audio/mp3", autoplay=False)
+            st.caption("Voz IA KSC · ElevenLabs")
+    except requests.HTTPError as exc:
+        st.warning(f"No se pudo generar la voz de ElevenLabs: {exc}")
+    except Exception as exc:
+        st.warning(f"Voz no disponible ahora: {exc}")
 
 def voice_input_component(key="stt"):
-    """Reliable Streamlit recorder + Groq Whisper transcription."""
-    try:
-        audio=st.audio_input("Habla con FitGlass",sample_rate=16000,key=key,label_visibility="collapsed")
-    except Exception as e:
-        st.error(f"El micrófono no está disponible en esta versión de Streamlit: {e}");return ""
-    if not audio:
-        st.caption("Pulsa el micrófono, habla y detén la grabación. FitGlass convertirá tu voz en texto automáticamente.");return ""
-    key_groq=ai_key()
-    if not key_groq:
-        st.warning("Falta GROQ_API_KEY para transcribir el dictado.");return ""
-    try:
-        result=ai_client(key_groq).audio.transcriptions.create(file=("fitglass_dictado.wav",audio.getvalue()),model="whisper-large-v3-turbo",language="es",response_format="json",temperature=0.0,prompt="Español de Perú. Nutrición, alimentos, comidas y nombres de FitGlass.")
-        transcript=str(getattr(result,"text","") or "").strip()
-        if transcript:
-            st.markdown(f"<div class='voice-transcript'><span>Transcripción</span>{html.escape(transcript)}</div>",unsafe_allow_html=True)
-            return transcript
-    except Exception as e:
-        st.error(f"No pude transcribir el audio: {e}")
-    return ""
-
-# ============================================================
-# FITGLASS INTELLIGENCE LAYER
-# ============================================================
-REGIONAL_FACTS={
-    "Piura":25.9,"Cusco":22.3,"Huancavelica":15.6,"Huánuco":21.8,"Ica":34.8,"Junín":19.9,"La Libertad":29.7,"Lambayeque":29.3,"Lima":31.6,"Loreto":22.3,"Madre de Dios":36.1,"Moquegua":38.6,"Pasco":19.4,"Puno":23.9,"San Martín":23.6,"Tacna":41.0,"Tumbes":30.6,"Ucayali":25.0
-}
-REGION_FOODS={"Piura":["seco de chavelo","malarrabia","ceviche","cabrito","arroz con pato","chifles"],"Lambayeque":["arroz con pato","cabrito","king kong"],"Arequipa":["rocoto relleno","adobo","solterito"],"Cusco":["chiri uchu","pachamanca","cuy"],"Lima":["ceviche","pollo a la brasa","lomo saltado"]}
-
-def regional_profile_note(p):
-    region=p.get("region","Perú"); lines=[]
-    if region in REGIONAL_FACTS: lines.append(f"ENDES 2024 reporta {REGIONAL_FACTS[region]:.1f}% de obesidad en personas de 15+ años para {region}. Es un dato poblacional y no predice tu resultado individual.")
-    if region in REGION_FOODS: lines.append("Referencias gastronómicas regionales: "+", ".join(REGION_FOODS[region])+". Son ejemplos culturales, no un ranking estadístico.")
-    if region=="Piura":lines.append("ENDES 2023 registró en Piura un promedio de 4.2 días por semana de consumo de frutas en personas de 15+ años.")
-    return " ".join(lines) if lines else "No hay una cifra departamental cargada para esta región; FitGlass no inventa datos."
-
-def browser_reminders(p):
-    if not bool(int(p.get("reminders_enabled",1) or 0)):return
-    water=water_today(p["id"]); goal=int(p.get("water_goal_ml") or 2000); total,_=day_totals(p["id"]); e=energy_estimate(p); target=float(e.get("target",0) or 0)
-    msg="Recuerda beber agua. Todavía estás por debajo de la mitad de tu objetivo." if water<goal*.5 else ("Tu registro de energía va ligero. Revisa si todavía te falta una comida." if target and total["kcal"]<target*.45 and datetime.now().hour>=14 else "Tu seguimiento está en marcha. Una decisión pequeña y constante cuenta.")
-    msg=json.dumps(msg,ensure_ascii=False)
-    components.html(f"<script>(function(){{const send=()=>{{if(!('Notification'in window))return;if(Notification.permission==='default')Notification.requestPermission();if(Notification.permission==='granted')new Notification('FitGlass',{{body:{msg}}});}};setTimeout(send,1800);}})();</script>",height=1)
-
-def render_streak_calendar(pid):
-    data=streak_calendar(pid,35)
-    today=date.today()
-    selected=st.session_state.get("calendar_selected_date",today)
-    if isinstance(selected,str):
-        try:selected=date.fromisoformat(selected)
-        except Exception:selected=today
-    st.markdown(f"""<div class='glass-surface' style='padding:22px;margin-top:16px'>
-<div class='kicker'>CONSTANCIA</div><div style='display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap'><div><div style='font-size:1.35rem;font-weight:900;color:#fff'>Calendario de rachas</div><div class='form-hint'>A = activa · N = nutricional · P = perfecta</div></div><div class='calendar-duration'>{len(usage_days(pid))} días usando FitGlass</div></div></div>""",unsafe_allow_html=True)
-    weekday_labels=["L","M","X","J","V","S","D"]
-    st.markdown("<div class='fg-calendar-head'>"+"".join(f"<span>{x}</span>" for x in weekday_labels)+"</div>",unsafe_allow_html=True)
-    by_date={x["date"]:x for x in data}
-    start_date=data[0]["date"]
-    while start_date.weekday()!=0:start_date-=timedelta(days=1)
-    cursor=start_date
-    for _ in range(5):
-        cols=st.columns(7,gap="small")
-        for i,col in enumerate(cols):
-            d=cursor+timedelta(days=i)
-            stt=by_date.get(d,{"status":"empty"})
-            status=stt.get("status","empty")
-            mark={"perfect":"P","nutrition":"N","active":"A","empty":""}.get(status,"")
-            display=f"{d.day}{(' · '+mark) if mark else ''}"
-            with col:
-                if st.button(display,key=f"cal_{pid}_{d.isoformat()}",disabled=d>today,use_container_width=True):
-                    st.session_state["calendar_selected_date"]=d
-                    st.rerun()
-                st.markdown(f"<div class='fg-cal-state {status}'></div>",unsafe_allow_html=True)
-        cursor+=timedelta(days=7)
-    sst=streak_status(pid,selected);totals,_=day_totals(pid,selected)
-    weekday=selected.strftime("%A")
-    weekday_es={"Monday":"Lunes","Tuesday":"Martes","Wednesday":"Miércoles","Thursday":"Jueves","Friday":"Viernes","Saturday":"Sábado","Sunday":"Domingo"}.get(weekday,weekday)
-    st.markdown(f"""<div class='glass-surface calendar-day-detail'><div class='kicker'>{weekday_es.upper()}</div><div class='calendar-detail-title'>{selected.strftime('%d/%m/%Y')}</div><div class='calendar-detail-metrics'><span>{sst['kcal']:.0f} kcal</span><span>{totals['protein']:.1f} g proteína</span><span>{sst['water']} ml agua</span></div><div class='form-hint'>Racha activa: {'sí' if sst['active'] else 'no'} · nutricional: {'sí' if sst['nutrition'] else 'no'} · perfecta: {'sí' if sst['perfect'] else 'no'}</div></div>""",unsafe_allow_html=True)
-    _, meals=day_totals(pid,selected)
-    if meals:
-        st.markdown("<div class='history-title'>Comidas de este día</div>",unsafe_allow_html=True)
-        for m in meals:
-            img=m.get("image_path");c1,c2=st.columns([0.22,0.78])
-            with c1:
-                if img and Path(img).exists():st.image(img,use_container_width=True)
-                else:st.markdown("<div class='history-photo-placeholder'>Foto</div>",unsafe_allow_html=True)
-            with c2:
-                title=html.escape(str(m.get("title") or "Comida"));typ=html.escape(str(m.get("meal_type") or ""));tm=html.escape(str(m.get("meal_time") or ""))
-                st.markdown(f"""<div class='history-meal'><div class='history-meal-title'>{title}</div><div class='history-meal-meta'>{typ} · {tm}</div><div class='history-meal-kcal'>{num(m.get('kcal')):.0f} kcal</div><div class='history-meal-macros'>Proteína {num(m.get('protein')):.1f} g · Carbohidratos {num(m.get('carbs')):.1f} g · Grasas {num(m.get('fat')):.1f} g · Fibra {num(m.get('fiber')):.1f} g</div></div>""",unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='note'>No hay comidas registradas en este día.</div>",unsafe_allow_html=True)
-
-st.markdown('<style>.voice-glass{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:linear-gradient(135deg,rgba(255,255,255,.10),rgba(255,255,255,.04));backdrop-filter:blur(24px) saturate(170%);margin-top:10px}.voice-glass button{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#fff;border-radius:999px;padding:7px 12px;font-weight:800}.voice-glass span{color:#a7c7b7;font-size:.78rem}.streak-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}.streak-metrics>div{padding:12px 14px;border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.045)}.streak-metrics b{display:block;color:#fff;font-size:1.5rem}.streak-metrics span{color:#9eb8aa;font-size:.75rem}.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.fg-calendar-head{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:12px 0 6px}.fg-calendar-head span{text-align:center;color:#77988a;font-weight:850;font-size:.72rem}.calendar-duration{font-size:.76rem;color:#9fb7aa}.calendar-day-detail{padding:18px;margin-top:12px}.calendar-detail-title{font-size:1.55rem;color:#fff;font-weight:900;margin-top:2px}.calendar-detail-metrics{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.calendar-detail-metrics span{padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);color:#d8ebe2;font-size:.76rem;font-weight:800}.history-title{font-size:1rem;font-weight:900;color:#fff;margin:18px 0 10px}.history-meal{padding:14px 16px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.075),rgba(255,255,255,.028));backdrop-filter:blur(20px);margin-bottom:10px}.history-meal-title{font-weight:900;color:#fff;font-size:1rem}.history-meal-meta{color:#8fac9e;font-size:.76rem;margin-top:3px}.history-meal-kcal{color:#7effbd;font-size:1.15rem;font-weight:900;margin-top:9px}.history-meal-macros{color:#b8cec2;font-size:.74rem;margin-top:4px;line-height:1.5}.history-photo-placeholder{height:78px;border-radius:16px;display:grid;place-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:#8aa798;font-size:.7rem}.fg-cal-state{height:3px;border-radius:99px;margin:-5px 8px 8px;box-shadow:0 0 12px currentColor}.fg-cal-state.perfect{background:#b697ff;color:#b697ff}.fg-cal-state.nutrition{background:#8eb6ff;color:#8eb6ff}.fg-cal-state.active{background:#7effbd;color:#7effbd}.fg-cal-state.empty{background:transparent;box-shadow:none}@media(max-width:760px){.fg-calendar-head{gap:3px}.fg-calendar-head span{font-size:.64rem}.calendar-detail-metrics{gap:6px}.calendar-detail-metrics span{font-size:.67rem;padding:7px 8px}}.cal-cell{aspect-ratio:1;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);display:grid;place-items:center;color:#aac4b4;font-weight:800}.cal-cell.active{background:rgba(110,255,188,.18);border-color:rgba(110,255,188,.30);color:#d9fff0}.cal-cell.nutrition{background:rgba(120,165,255,.20);border-color:rgba(120,165,255,.36);color:#e7efff}.cal-cell.perfect{background:linear-gradient(135deg,rgba(182,132,255,.30),rgba(110,255,188,.18));border-color:rgba(194,157,255,.48);color:#fff}.cal-cell span{font-size:.78rem}.region-note{padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.03));color:#c5d9ce;line-height:1.55}.analysis-card{padding:24px;border-radius:24px;background:radial-gradient(circle at 50% 0,rgba(120,165,255,.18),transparent 55%),linear-gradient(135deg,rgba(255,255,255,.10),rgba(255,255,255,.035));border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 70px rgba(0,0,0,.24);backdrop-filter:blur(28px) saturate(175%);text-align:center}.analysis-orb{width:86px;height:86px;border-radius:50%;margin:0 auto 16px;background:radial-gradient(circle at 35% 30%,#fff,rgba(129,255,200,.75) 18%,rgba(104,155,255,.28) 45%,transparent 70%);box-shadow:0 0 45px rgba(110,220,255,.28);animation:analysisPulse 1.7s ease-in-out infinite}.analysis-ring{width:124px;height:124px;border-radius:50%;margin:0 auto 16px;border:1px solid rgba(255,255,255,.15);box-shadow:inset 0 0 25px rgba(130,255,210,.15),0 0 45px rgba(120,170,255,.10);animation:analysisRotate 2.8s linear infinite}@keyframes analysisPulse{0%,100%{transform:scale(.92);opacity:.7}50%{transform:scale(1.08);opacity:1}}@keyframes analysisRotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style>', unsafe_allow_html=True)
+    components.html(f"""
+    <div style="font-family:Manrope,sans-serif">
+      <button id="mic_{key}" style="background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.20);
+        color:#f7fffb;font-weight:800;padding:10px 16px;border-radius:14px;cursor:pointer;backdrop-filter:blur(18px)">
+        Dictar
+      </button>
+      <span id="out_{key}" style="margin-left:10px;color:#a8c6b7;font-size:.84rem"></span>
+    </div>
+    <script>
+      const SR_{key}=window.SpeechRecognition||window.webkitSpeechRecognition;
+      const out_{key}=document.getElementById('out_{key}');
+      const btn_{key}=document.getElementById('mic_{key}');
+      if(!SR_{key}){{out_{key}.innerText='Dictado no compatible en este navegador.';}}
+      else{{
+        const rec_{key}=new SR_{key}();rec_{key}.lang='es-PE';rec_{key}.interimResults=false;rec_{key}.maxAlternatives=1;
+        btn_{key}.onclick=()=>{{out_{key}.innerText='Escuchando…';rec_{key}.start();}};
+        rec_{key}.onresult=(e)=>{{const said=e.results[0][0].transcript;out_{key}.innerText=said;navigator.clipboard?.writeText(said);}};
+        rec_{key}.onerror=(e)=>{{out_{key}.innerText='No se pudo usar el micrófono: '+e.error;}};
+      }}
+    </script>
+    """, height=48)
 
 # ============================================================
 # UI
@@ -1655,158 +1439,54 @@ def svg_icon(name, size=24, stroke="currentColor"):
 
 def render_topbar(profile):
     avatar=(profile.get("name", "K")[0].upper() if profile else "K")
-    left=f'<div class="brandmark">{svg_icon("leaf",30,"#9affd0")}<div><div style="font-size:1.08rem">FitGlass</div><div style="font-size:.68rem;color:#98b4a6;font-weight:700;letter-spacing:.08em">NUTRIVISION</div></div></div>'
+    left=f'<div class="brandmark">{svg_icon("leaf",30,"#9affd0")}<div><div style="font-size:1.08rem">IA KSC</div><div style="font-size:.68rem;color:#98b4a6;font-weight:700;letter-spacing:.08em">NUTRIVISION</div></div></div>'
     right=f'<div style="display:flex;align-items:center;gap:10px"><div style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,rgba(130,255,200,.28),rgba(120,160,255,.28));border:1px solid rgba(255,255,255,.18);font-weight:900">{avatar}</div></div>'
     st.markdown(f'<div class="glass-surface topbar">{left}{right}</div>',unsafe_allow_html=True)
 
 def onboarding():
-    """First-run experience: one question at a time, with animated Liquid Glass UI."""
-    defaults = {
-        "name":"", "age":30, "sex":"Prefiero no indicar", "height":170.0, "weight":70.0,
-        "activity":list(ACTIVITY_FACTORS)[1], "goal":"Mantener", "diet":"Omnívora",
-        "allergies":"", "intolerances":"", "avoid":"", "favorites":"", "special":"Ninguna",
-        "water_goal":2200, "calorie_target":0, "protein_target":0, "pin":"", "region":"Piura"
-    }
-    ob = st.session_state.setdefault("onboarding", defaults.copy())
-    st.session_state.setdefault("onboarding_step", 0)
-    step = st.session_state["onboarding_step"]
-    total = 7
-
-    questions = [
-        ("Tu nombre", "Vamos a personalizar todo para ti.", "Escribe cómo quieres que te llame."),
-        ("Datos de referencia", "Necesitamos una base para estimar tu energía.", "Edad, sexo, talla y peso permiten una estimación inicial."),
-        ("Tu movimiento diario", "Ahora cuéntame cómo es tu día normal.", "No necesitas ser exacto. Elige lo que más se parezca a tu rutina."),
-        ("Tu objetivo", "¿Qué quieres conseguir?", "Esto ajustará la orientación de calorías y nutrientes."),
-        ("Cómo comes", "Cuéntame cómo sueles alimentarte.", "Tus preferencias se usarán al analizar platos y crear recetas."),
-        ("Lo que debemos cuidar", "Hay datos que tu asistente debe respetar.", "Puedes dejar cualquier campo vacío si no aplica."),
-        ("Tu punto de partida", "Un último ajuste y entramos.", "Definiremos agua, objetivos opcionales y acceso al perfil."),
-    ]
-    title, subtitle, hint = questions[step]
-    progress = int(((step + 1) / total) * 100)
-
-    particle_html="".join([f"<i class='fg-particle p{i}'></i>" for i in range(16)])
-    st.markdown(f"""
-    <div class="onboarding-stage question-stage stage-{step}">
-      <div class="onboarding-orb orb-a"></div><div class="onboarding-orb orb-b"></div>
-      <div class="fg-particles">{particle_html}</div>
-      <div class="onboarding-shell">
-        <div class="onboarding-top">
-          <div class="brandmark">{svg_icon('leaf',28,'#d7fff0')}<div><div class="ob-brand">FitGlass</div><div class="ob-kicker">PERSONALIZACIÓN</div></div></div>
-          <div class="ob-step">{step+1} / {total}</div>
-        </div>
-        <div class="ob-progress"><div style="width:{progress}%"></div></div>
-        <div class="ob-copy">
-          <div class="ob-eyebrow">{subtitle}</div>
-          <div class="onboarding-title">{title}</div>
-          <div class="form-hint ob-hint">{hint}</div>
-        </div>
-    </div></div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<div class='ob-card-wrap'>", unsafe_allow_html=True)
-    with st.form(f"onboarding_step_{step}", clear_on_submit=False):
-        if step == 0:
-            ob["name"] = st.text_input("¿Cómo quieres que te llame?", value=ob["name"], placeholder="Tu nombre", label_visibility="visible")
-            st.markdown("<div class='ob-tip'>Tu nombre solo se usa para personalizar la experiencia.</div>", unsafe_allow_html=True)
-
-        elif step == 1:
-            a,b = st.columns(2)
-            with a:
-                st.markdown("<div class='control-label'>Edad</div>", unsafe_allow_html=True)
-                age_slider=st.slider("Edad", 10, 100, int(ob["age"]), 1, key="ob_age_slider", label_visibility="collapsed")
-                age_direct=st.number_input("Edad exacta", 10, 100, int(age_slider), 1, key="ob_age_direct", label_visibility="collapsed")
-                ob["age"]=int(age_direct)
-                st.markdown("<div class='control-hint'>Desliza o escribe directamente.</div>", unsafe_allow_html=True)
-                ob["height"] = st.number_input("Talla (cm)", 120.0, 230.0, float(ob["height"]), 0.5)
-            with b:
-                ob["sex"] = st.selectbox("Referencia fisiológica", ["Prefiero no indicar","Masculino","Femenino"], index=["Prefiero no indicar","Masculino","Femenino"].index(ob["sex"]))
-                ob["weight"] = st.number_input("Peso (kg)", 30.0, 250.0, float(ob["weight"]), 0.1)
-            regions=list(dict.fromkeys(list(REGIONAL_FACTS.keys())+["Amazonas","Áncash","Apurímac","Arequipa","Ayacucho","Cajamarca","Callao","Huancavelica","Pasco","San Martín","Tumbes","Ucayali"]))
-            ob["region"]=st.selectbox("¿De qué parte del Perú eres?",regions,index=regions.index(ob.get("region","Piura")) if ob.get("region","Piura") in regions else 0)
-
-        elif step == 2:
-            activity_options = list(ACTIVITY_FACTORS)
-            ob["activity"] = st.radio("¿Cómo es tu actividad habitual?", activity_options, index=activity_options.index(ob["activity"]), label_visibility="visible")
-
-        elif step == 3:
-            goals=["Mantener","Perder peso","Ganar masa muscular","Ganar peso"]
-            ob["goal"] = st.radio("¿Cuál es tu objetivo principal?", goals, index=goals.index(ob["goal"]), horizontal=False)
-            if ob["goal"] == "Perder peso":
-                st.markdown("<div class='ob-soft-note'>La app calculará una orientación moderada. No sustituye la evaluación de un profesional.</div>", unsafe_allow_html=True)
-            elif ob["goal"] == "Ganar masa muscular":
-                st.markdown("<div class='ob-soft-note'>Priorizaremos proteína, energía suficiente y constancia.</div>", unsafe_allow_html=True)
-
-        elif step == 4:
-            diets=["Omnívora","Vegetariana","Vegana","Pescetariana","Baja en carbohidratos","Otra"]
-            ob["diet"] = st.selectbox("Patrón alimentario", diets, index=diets.index(ob["diet"]))
-            ob["favorites"] = st.text_input("Alimentos que disfrutas", value=ob["favorites"], placeholder="Ej.: pollo, arroz, yogur")
-
-        elif step == 5:
-            ob["allergies"] = st.text_input("Alergias", value=ob["allergies"], placeholder="Ej.: maní, mariscos")
-            ob["intolerances"] = st.text_input("Intolerancias", value=ob["intolerances"], placeholder="Ej.: lactosa, gluten")
-            ob["avoid"] = st.text_input("Alimentos que prefieres evitar", value=ob["avoid"], placeholder="Separados por comas")
-            special=["Ninguna","Embarazo","Lactancia"]
-            ob["special"] = st.selectbox("Situación especial", special, index=special.index(ob["special"]))
-
-        elif step == 6:
-            ob["water_goal"] = st.slider("Meta de agua diaria (ml)", 1000, 5000, int(ob["water_goal"]), 100)
-            c1,c2 = st.columns(2)
-            with c1:
-                ob["calorie_target"] = st.number_input("Calorías/día", 0, 6000, int(ob["calorie_target"]), 50, help="0 = cálculo automático")
-            with c2:
-                ob["protein_target"] = st.number_input("Proteína g/día", 0.0, 400.0, float(ob["protein_target"]), 1.0, help="0 = cálculo automático")
-            ob["pin"] = st.text_input("PIN opcional", value=ob["pin"], type="password", max_chars=4, placeholder="4 dígitos")
-            st.markdown("<div class='ob-finish'>Tu perfil se guardará en este dispositivo y podrás editarlo después.</div>", unsafe_allow_html=True)
-
-        st.markdown("<div class='ob-actions-spacer'></div>", unsafe_allow_html=True)
-        back_col, _, next_col = st.columns([1.2, 3.2, 1.8])
-        with back_col:
-            back = st.form_submit_button("Atrás", disabled=(step == 0), use_container_width=True)
-        with next_col:
-            label = "Entrar a FitGlass" if step == total - 1 else "Continuar"
-            forward = st.form_submit_button(label, type="primary", use_container_width=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if back and step > 0:
-        st.session_state["onboarding_step"] = step - 1
-        st.rerun()
-    if forward:
-        if step == 0 and not ob["name"].strip():
-            st.error("Escribe tu nombre para continuar.")
+    st.markdown(f'<div class="glass-surface" style="padding:34px 28px 28px;margin-top:5vh">{svg_icon("leaf",42,"#9affd0")}<div class="onboarding-title" style="margin-top:14px">Conoce tu cuerpo.<br><span>Empieza con IA KSC.</span></div><div class="form-hint" style="max-width:780px;font-size:1rem;margin-top:16px">Antes de entrar al diario, crea tu perfil. Con estos datos IA KSC estima tu energía diaria y adapta las recomendaciones a tus preferencias, alergias e intolerancias.</div></div>',unsafe_allow_html=True)
+    st.markdown("<div style='height:14px'></div>",unsafe_allow_html=True)
+    with st.form("first_profile", clear_on_submit=False):
+        a,b=st.columns(2)
+        with a:
+            st.markdown("### Datos personales")
+            name=st.text_input("Nombre",placeholder="¿Cómo quieres que te llame?")
+            age=st.number_input("Edad",min_value=10,max_value=100,value=30,step=1)
+            sex=st.selectbox("Sexo fisiológico para la estimación energética",["Prefiero no indicar","Masculino","Femenino"])
+            height=st.number_input("Talla",120.0,230.0,170.0,0.5,help="Centímetros")
+            weight=st.number_input("Peso",30.0,250.0,70.0,0.1,help="Kilogramos")
+            activity=st.selectbox("Nivel de actividad",list(ACTIVITY_FACTORS),index=1)
+            goal=st.selectbox("Objetivo",["Mantener","Perder peso","Ganar masa muscular","Ganar peso"])
+        with b:
+            st.markdown("### Alimentación y preferencias")
+            diet=st.selectbox("Patrón alimentario",["Omnívora","Vegetariana","Vegana","Pescetariana","Baja en carbohidratos","Otra"])
+            allergies=st.text_area("Alergias",placeholder="Ej.: maní, mariscos…",height=76)
+            intolerances=st.text_area("Intolerancias",placeholder="Ej.: lactosa, gluten…",height=76)
+            avoid=st.text_area("Alimentos que prefieres evitar",placeholder="Separados por comas",height=76)
+            favorites=st.text_area("Tus alimentos favoritos",placeholder="Ej.: pollo, arroz, yogur…",height=76)
+            special=st.selectbox("Situación especial",["Ninguna","Embarazo","Lactancia"])
+            water_goal=st.number_input("Meta de agua",1000,5000,2200,100)
+        st.markdown("### Metas opcionales")
+        c1,c2,c3=st.columns(3)
+        with c1: calorie_target=st.number_input("Calorías/día",0,6000,0,50,help="0 = automática")
+        with c2: protein_target=st.number_input("Proteína g/día",0.0,400.0,0.0,1.0,help="0 = automática")
+        with c3: pin=st.text_input("PIN de acceso",type="password",max_chars=4,help="Opcional; deja vacío para no usar PIN")
+        submitted=st.form_submit_button("Crear mi perfil",type="primary",use_container_width=True)
+    if submitted:
+        errors=[]
+        if not name.strip(): errors.append("Escribe tu nombre.")
+        if pin and not re.fullmatch(r"\d{4}",pin): errors.append("El PIN debe tener 4 dígitos.")
+        if errors:
+            for e in errors: st.error(e)
             return
-        if step == total - 1:
-            if ob["pin"] and not re.fullmatch(r"\d{4}", ob["pin"]):
-                st.error("El PIN debe tener exactamente 4 dígitos.")
-                return
-            kcal, prot, carbs, fat = calculate_targets(ob["sex"], int(ob["age"]), float(ob["height"]), float(ob["weight"]), ob["activity"], ob["goal"])
-            if ob["calorie_target"] <= 0:
-                ob["calorie_target"] = kcal
-            if ob["protein_target"] <= 0:
-                ob["protein_target"] = prot
-            ob["carbs_target"] = carbs
-            ob["fat_target"] = fat
-            payload={
-                "name":ob["name"].strip(), "age":int(ob["age"]), "sex_energy":ob["sex"],
-                "height_cm":float(ob["height"]), "weight_kg":float(ob["weight"]), "activity":ob["activity"],
-                "goal":ob["goal"], "favorite_foods":ob["favorites"], "favorite_fruits":"", "favorite_vegetables":"",
-                "avoid_foods":ob["avoid"], "allergies":ob["allergies"], "special_state":ob["special"],
-                "photo_path":"", "pin_hash":hash_pin(ob["pin"]) if ob["pin"] else "", "water_goal_ml":int(ob["water_goal"]),
-                "diet_style":ob["diet"], "intolerances":ob["intolerances"], "region":ob.get("region","Piura"), "notes":"", "reminders_enabled":1, "calorie_target":float(ob["calorie_target"]),
-                "protein_target":float(ob["protein_target"]), "carbs_target":float(carbs), "fat_target":float(fat)
-            }
-            pid=create_profile(payload)
-            add_points(pid,20,"Perfil creado")
-            st.session_state["pid"]=pid
-            st.session_state[f"unlocked_{pid}"]=True
-            st.session_state["welcome_summary"]=personalized_plan_summary(get_profile(pid))
-            st.session_state.pop("onboarding", None)
-            st.session_state.pop("onboarding_step", None)
-            st.rerun()
-        else:
-            st.session_state["onboarding_step"] = step + 1
-            st.rerun()
-
+        tmp={"name":name.strip(),"age":int(age),"sex_energy":sex,"height_cm":height,"weight_kg":weight,"activity":activity,"goal":goal,
+             "favorite_foods":favorites,"favorite_fruits":"","favorite_vegetables":"","avoid_foods":avoid,"allergies":allergies,
+             "special_state":special,"photo_path":"","pin_hash":hash_pin(pin) if pin else "","water_goal_ml":int(water_goal),"diet_style":diet,
+             "intolerances":intolerances,"calorie_target":float(calorie_target),"protein_target":float(protein_target),"carbs_target":0.0,"fat_target":0.0}
+        pid=create_profile(tmp)
+        add_points(pid,20,"Perfil creado")
+        st.session_state["pid"]=pid;st.session_state[f"unlocked_{pid}"]=True
+        st.rerun()
 
 profiles=list_profiles()
 if not profiles:
@@ -1815,12 +1495,8 @@ if not profiles:
 
 pid=st.session_state.get("pid")
 if pid not in [p["id"] for p in profiles]: pid=profiles[0]["id"];st.session_state["pid"]=pid
-profile=ensure_profile_targets(pid) or get_profile(pid)
+profile=get_profile(pid)
 render_topbar(profile)
-if st.session_state.get("welcome_summary"):
-    welcome=st.session_state.pop("welcome_summary")
-    st.markdown(f'<div class="glass-surface" style="padding:24px;margin-bottom:14px"><div class="kicker">TU PLAN DE PARTIDA</div><div style="font-size:1.35rem;font-weight:900;color:#fff">Perfil listo</div><div class="form-hint" style="margin:8px 0 0">{welcome}</div></div>',unsafe_allow_html=True)
-    render_ai_response(welcome,autoplay=True,key="welcome_tts")
 
 c1,c2,c3=st.columns(3)
 with c1:
@@ -1838,20 +1514,12 @@ main_section=st.session_state.get("main_section","Inicio")
 # INICIO — DASHBOARD
 # ============================================================
 if main_section=="Inicio":
-    browser_reminders(profile)
-    rem_col1,rem_col2=st.columns([1,3])
-    with rem_col1:
-        reminders_on=st.toggle("Recordatorios",value=bool(int(profile.get("reminders_enabled",1) or 0)),key="fg_reminders")
-    if reminders_on != bool(int(profile.get("reminders_enabled",1) or 0)):
-        update_profile(profile["id"],{**profile,"reminders_enabled":int(reminders_on)})
-        profile=get_profile(profile["id"])
     total,meals=day_totals(profile["id"]);water=water_today(profile["id"]);goal=int(profile.get("water_goal_ml") or 2000)
     energy=energy_estimate(profile);pts,lvl,nxt=level_info(profile["id"]);racha=streak(profile["id"])
-    weekday_es={"Monday":"Lunes","Tuesday":"Martes","Wednesday":"Miércoles","Thursday":"Jueves","Friday":"Viernes","Saturday":"Sábado","Sunday":"Domingo"}.get(datetime.now().strftime("%A"),datetime.now().strftime("%A"))
     target=float(energy.get("target",0) or 0); kcal_pct=min(100,(total["kcal"]/target*100 if target else 0))
     protein_target=float(energy.get("protein_target",0) or 0); protein_pct=min(100,total["protein"]/protein_target*100 if protein_target else 0)
     water_pct=min(100,water/goal*100 if goal else 0)
-    st.markdown(f'<div class="glass-surface" style="padding:30px;margin-top:14px"><div class="form-hint" style="margin:0;color:#89f4bc;font-weight:850;letter-spacing:.1em">HOY</div><div style="font-size:clamp(2rem,5vw,3.6rem);font-weight:950;letter-spacing:-.06em;color:#fff;margin-top:7px">Hola, {profile["name"].split()[0]}.</div><div style="color:#9fb7aa;max-width:760px;margin-top:8px">{weekday_es}, {datetime.now().strftime("%d/%m/%Y")}. Tu panel se adapta a tus metas y a lo que ya registraste. Nada de ruido: solo lo que necesitas para decidir tu siguiente comida.</div></div>',unsafe_allow_html=True)
+    st.markdown(f'<div class="glass-surface" style="padding:30px;margin-top:14px"><div class="form-hint" style="margin:0;color:#89f4bc;font-weight:850;letter-spacing:.1em">HOY</div><div style="font-size:clamp(2rem,5vw,3.6rem);font-weight:950;letter-spacing:-.06em;color:#fff;margin-top:7px">Hola, {profile["name"].split()[0]}.</div><div style="color:#9fb7aa;max-width:760px;margin-top:8px">Tu panel se adapta a tus metas y a lo que ya registraste. Nada de ruido: solo lo que necesitas para decidir tu siguiente comida.</div></div>',unsafe_allow_html=True)
     st.markdown("<div style='height:16px'></div>",unsafe_allow_html=True)
     r1,r2,r3=st.columns(3)
     rings=[("Calorías",kcal_pct,f'{total["kcal"]:.0f}/{target:.0f} kcal','#83ffbe'),("Proteína",protein_pct,f'{total["protein"]:.0f}/{protein_target:.0f} g','#83b7ff'),("Agua",water_pct,f'{water}/{goal} ml','#b798ff')]
@@ -1873,10 +1541,6 @@ if main_section=="Inicio":
         st.dataframe(df[["meal_time","meal_type","title","kcal","protein","fiber"]],hide_index=True,use_container_width=True)
     else:
         st.markdown('<div class="glass-surface" style="padding:22px;margin-top:16px"><b style="color:#fff">Tu día todavía está vacío.</b><div class="form-hint">Abre Hoy para tomar una foto y empezar tu registro.</div></div>',unsafe_allow_html=True)
-    if profile.get("special_state") in ("Embarazo","Lactancia"):
-        st.markdown(f'<div class="region-note"><b style="color:#fff">Modo especial</b><div style="margin-top:6px">{profile.get("special_state")} requiere una orientación distinta. FitGlass evita metas agresivas y recomienda validación profesional.</div></div>',unsafe_allow_html=True)
-    st.markdown(f'<div class="region-note" style="margin-top:18px"><b style="color:#fff">Contexto de {profile.get("region","Perú")}</b><div style="margin-top:6px">{regional_profile_note(profile)}</div></div>',unsafe_allow_html=True)
-    render_streak_calendar(profile["id"])
     st.stop()
 
 # ============================================================
@@ -1892,12 +1556,10 @@ if main_section=="Hoy":
         if f:
             jpeg=compact_jpeg(f.getvalue());st.image(jpeg,width=480)
             if st.button("Analizar comida",type="primary",use_container_width=True,key="today_analyze"):
-                try:
-                    ph=st.empty(); ph.markdown("<div class=\"analysis-card\"><div class=\"analysis-ring\"><div class=\"analysis-orb\"></div></div><div style=\"font-size:1.15rem;font-weight:900;color:#fff\">Analizando tu comida</div><div class=\"form-hint\">Reconociendo plato, porciones y peso estimado.</div></div>",unsafe_allow_html=True); time.sleep(.25); st.session_state["mealres"]=detect_foods(ai_key(),jpeg); st.session_state["mealjpeg"]=jpeg; ph.empty()
+                try:st.session_state["mealres"]=detect_foods(ai_key(),jpeg);st.session_state["mealjpeg"]=jpeg
                 except Exception as e:st.error(f"No pude analizar la imagen: {e}")
             res=st.session_state.get("mealres")
             if res and res.get("foods"):
-                st.markdown(f'<div class="glass-surface" style="padding:18px 20px;margin:14px 0"><div class="kicker">PLATO DETECTADO</div><div style="font-size:1.55rem;font-weight:950;color:#fff">{res.get("dish_name","Plato no identificado")}</div><div class="form-hint">Peso estimado del plato: <b style="color:#fff">{res.get("total_estimated_grams",0)} g</b>. Es una estimación visual, no una báscula.</div></div>',unsafe_allow_html=True)
                 calc=enrich(res,"today")
                 if calc:
                     tot=total_nutrition(calc);show_metrics(tot)
@@ -1918,13 +1580,13 @@ if main_section=="Hoy":
 # ============================================================
 # COACH — HERRAMIENTAS EXISTENTES ORGANIZADAS
 # ============================================================
-section("COACH","Tu asistente","FitGlass, recetas, escáneres, planes, progreso y cuenta en un solo lugar.")
+section("COACH","Tu asistente","IA KSC, recetas, escáneres, planes, progreso y cuenta en un solo lugar.")
 coach_group=st.selectbox("Área",["IA y nutrición","Comida y escáneres","Plan y hábitos","Progreso y cuenta"],label_visibility="collapsed",key="coach_group")
 coach_options={
-    "IA y nutrición":[("Asistente IA"," Chat por voz con FitGlass"),("Comparar platos"," Comparar platos")],
+    "IA y nutrición":[("Asistente IA"," Chat por voz con IA KSC"),("Comparar platos"," Comparar platos")],
     "Comida y escáneres":[("Diario de comidas"," Diario de comidas"),("Código de barras"," Escáner de código de barras"),("Etiqueta nutricional"," Escáner de etiqueta"),("Cocina inteligente"," Cocina inteligente")],
     "Plan y hábitos":[("Plan semanal"," Plan semanal"),("Agua y hábitos"," Agua & hábitos"),("Recompensas"," Recompensas KSC"),("Actividad"," Arena de Push-Ups")],
-    "Progreso y cuenta":[("Progreso"," Mi progreso"),("Academia"," Academia FitGlass (quiz)"),("Comunidad"," Comunidad"),("Mi perfil"," Mi perfil"),("Configuración"," Configuración")]
+    "Progreso y cuenta":[("Progreso"," Mi progreso"),("Academia"," Academia KSC (quiz)"),("Comunidad"," Comunidad"),("Mi perfil"," Mi perfil"),("Configuración"," Configuración")]
 }
 coach_items=coach_options[coach_group]
 labels=[x[0] for x in coach_items]
@@ -1945,7 +1607,7 @@ if page==" Inicio":
         st.markdown("###  Empieza rápido")
         c1,c2,c3=st.columns(3)
         c1.markdown('<div class="mini"><div class="kicker">PASO 1</div><div class="big"> Crea tu perfil</div><div class="note">Ve a "Mi perfil" y regístrate con foto, gustos y PIN.</div></div>',unsafe_allow_html=True)
-        c2.markdown('<div class="mini"><div class="kicker">PASO 2</div><div class="big"> Registra tu comida</div><div class="note">Sube una foto y deja que FitGlass calcule los nutrientes.</div></div>',unsafe_allow_html=True)
+        c2.markdown('<div class="mini"><div class="kicker">PASO 2</div><div class="big"> Registra tu comida</div><div class="note">Sube una foto y deja que IA KSC calcule los nutrientes.</div></div>',unsafe_allow_html=True)
         c3.markdown('<div class="mini"><div class="kicker">PASO 3</div><div class="big"> Gana puntos</div><div class="note">Cada acción saludable suma puntos y sube tu nivel.</div></div>',unsafe_allow_html=True)
     else:
         total,meals=day_totals(profile["id"]);water=water_today(profile["id"]);goal=int(profile.get("water_goal_ml") or 2000)
@@ -1993,7 +1655,7 @@ if page==" Inicio":
             try:
                 ans=ksc_chat(profile,prompt)
                 st.markdown(ans)
-                voice_reader_component(ans, autoplay=True, key="home_tts")
+                voice_reader_component(ans, autoplay=False, key="home_tts")
             except RuntimeError as e:st.error(str(e))
         if meals:st.dataframe(pd.DataFrame(meals)[["meal_time","meal_type","title","kcal","protein","fiber"]],hide_index=True,use_container_width=True)
 
@@ -2013,7 +1675,6 @@ elif page==" Mi perfil":
                 height=st.number_input("Talla cm",120.,230.,165.,.5);weight=st.number_input("Peso kg",30.,250.,60.,.1)
                 activity=st.selectbox("Actividad",list(ACTIVITY_FACTORS),index=1)
                 goal=st.selectbox("Objetivo",["Mantener","Ganar masa muscular","Ganar peso","Perder peso"])
-                region=st.selectbox("Región del Perú",list(dict.fromkeys(list(REGIONAL_FACTS.keys())+["Amazonas","Áncash","Apurímac","Arequipa","Ayacucho","Cajamarca","Callao"])),index=0)
                 water_goal=st.number_input("Meta de agua ml/día",500,5000,2000,100)
             with c2:
                 photo=st.file_uploader("Foto",type=["jpg","jpeg","png"],key="np_photo")
@@ -2032,7 +1693,7 @@ elif page==" Mi perfil":
                 pid=create_profile({"name":name.strip(),"age":int(age),"sex_energy":sex,"height_cm":height,"weight_kg":weight,
                     "activity":activity,"goal":goal,"favorite_foods":fav,"favorite_fruits":fr,"favorite_vegetables":veg,
                     "avoid_foods":avoid,"allergies":allerg,"special_state":special,"photo_path":pp,
-                    "pin_hash":hash_pin(pin),"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"region":region,"notes":"","reminders_enabled":1,"calorie_target":0,"protein_target":0,"carbs_target":0,"fat_target":0})
+                    "pin_hash":hash_pin(pin),"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"calorie_target":0,"protein_target":0,"carbs_target":0,"fat_target":0})
                 add_points(pid,20,"Perfil creado");st.session_state["pid"]=pid;st.session_state[f"unlocked_{pid}"]=True
                 st.success("Perfil creado y guardado permanentemente. ");st.rerun()
 
@@ -2065,7 +1726,7 @@ elif page==" Mi perfil":
                 if photo:pp=save_jpeg(photo.getvalue(),PROFILE_DIR,f"profile_{profile['id']}",700)
                 update_profile(profile["id"],{"name":name,"age":int(age),"sex_energy":sex,"height_cm":height,"weight_kg":weight,
                     "activity":activity,"goal":goal,"favorite_foods":fav,"favorite_fruits":fr,"favorite_vegetables":veg,
-                    "avoid_foods":avoid,"allergies":allerg,"special_state":special,"photo_path":pp,"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"region":region,"notes":profile.get("notes",""),"reminders_enabled":int(profile.get("reminders_enabled",1) or 0),"calorie_target":float(profile.get("calorie_target") or 0),"protein_target":float(profile.get("protein_target") or 0),"carbs_target":float(profile.get("carbs_target") or 0),"fat_target":float(profile.get("fat_target") or 0)})
+                    "avoid_foods":avoid,"allergies":allerg,"special_state":special,"photo_path":pp,"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"calorie_target":float(profile.get("calorie_target") or 0),"protein_target":float(profile.get("protein_target") or 0),"carbs_target":float(profile.get("carbs_target") or 0),"fat_target":float(profile.get("fat_target") or 0)})
                 st.success("Guardado.");st.rerun()
             st.markdown("---")
             with st.expander("Eliminar este perfil (irreversible)"):
@@ -2080,7 +1741,7 @@ elif page==" Mi perfil":
 
 elif page==" Comunidad":
     need_profile(profile)
-    section("COMUNIDAD","Otros usuarios de FitGlass","Perfiles creados en esta app (sin contraseñas). Puedes retarlos o escribirles.")
+    section("COMUNIDAD","Otros usuarios de IA KSC","Perfiles creados en esta app (sin contraseñas). Puedes retarlos o escribirles.")
     st.caption("Esto muestra los perfiles guardados en este dispositivo/servidor. Para una red entre distintos dispositivos se necesitaría un servidor compartido; aquí todos comparten la misma base de datos local.")
     community=[c for c in read_community() if c["id"]!=profile["id"]]
     if not community:
@@ -2131,7 +1792,7 @@ elif page==" Comunidad":
 # ============================================================
 
 elif page==" Diario de comidas":
-    need_profile(profile);section("DIARIO","Diario fotográfico de comidas","Foto -> FitGlass -> nutrientes -> guardar.")
+    need_profile(profile);section("DIARIO","Diario fotográfico de comidas","Foto -> IA KSC -> nutrientes -> guardar.")
     ta,tb=st.tabs([" Nueva comida","Historial"])
     with ta:
         src=st.radio("Fuente",["Subir foto","Cámara"],horizontal=True)
@@ -2151,7 +1812,7 @@ elif page==" Diario de comidas":
                     if st.button(" Analizar para mi perfil"):
                         try:
                             ans=ksc_chat(profile,f"Analiza este plato para mí: {[(x['name'],x['grams']) for x in calc]}. Totales {tot}.")
-                            render_ai_response(ans,autoplay=True,key="meal_tts")
+                            st.markdown(ans);voice_reader_component(ans,autoplay=False,key="meal_tts")
                         except Exception as e:st.error(str(e))
                     c1,c2=st.columns(2);mt=c1.selectbox("Momento",["Desayuno","Media mañana","Almuerzo","Merienda","Cena","Otro"]);title=c2.text_input("Nombre",res.get("summary","Mi comida")[:80])
                     note=st.text_input("Nota")
@@ -2174,7 +1835,7 @@ elif page==" Diario de comidas":
 
 elif page==" Escáner de código de barras":
     need_profile(profile)
-    section("CÓDIGO DE BARRAS","Escáner de productos","Escribe el número o sube una foto legible; FitGlass lo interpreta con una base pública de productos.")
+    section("CÓDIGO DE BARRAS","Escáner de productos","Escribe el número o sube una foto legible; IA KSC lo interpreta con una base pública de productos.")
     t1,t2=st.tabs(["Número manual"," Foto del código"])
     code=None
     with t1:
@@ -2220,7 +1881,7 @@ elif page==" Escáner de código de barras":
             if st.button(" ¿Me conviene este producto?",type="primary"):
                 try:
                     ans=ksc_chat(profile,f"Analiza este producto escaneado para mi perfil: {json.dumps(info,ensure_ascii=False)}")
-                    render_ai_response(ans,autoplay=True,key="bc_tts")
+                    st.markdown(ans);voice_reader_component(ans,autoplay=False,key="bc_tts")
                 except Exception as e:st.error(str(e))
 
 # ============================================================
@@ -2275,41 +1936,33 @@ elif page==" Comparar platos":
             if st.button(" ¿Cuál encaja mejor conmigo?"):
                 try:
                     ans=ksc_chat(profile,f"Compara estos platos para mi perfil. A={totals[0]}, B={totals[1]}. Explica contexto y alternativa.")
-                    render_ai_response(ans,autoplay=True,key="cmp_tts")
+                    st.markdown(ans);voice_reader_component(ans,autoplay=False,key="cmp_tts")
                 except Exception as e:st.error(str(e))
 
 # ============================================================
 # CHAT POR VOZ
 # ============================================================
 
-elif page==" Chat por voz con FitGlass":
+elif page==" Chat por voz con IA KSC":
     need_profile(profile)
-    section("CHAT","Habla con FitGlass","Escribe o habla por micrófono; FitGlass te puede responder también con voz. Solo alimentación, recetas y nutrición.")
+    section("CHAT","Habla con IA KSC","Escribe o habla por micrófono; IA KSC te puede responder también con voz. Solo alimentación, recetas y nutrición.")
 
+    voice_on = st.toggle(" Leer respuestas en voz alta automáticamente", value=False)
     st.markdown("####  Dictado por voz (gratis, funciona en Chrome)")
-    st.markdown("### Ajustes por conversación")
-    edit_req=st.text_input("Dile a FitGlass qué quieres cambiar",placeholder="Agrega zanahoria a mis verduras favoritas")
-    if st.button("Actualizar mi perfil con FitGlass",key="ai_profile_edit",type="primary") and edit_req.strip():
-        try:
-            changed=ai_edit_profile(profile,edit_req)
-            if changed: st.success("Perfil actualizado: "+", ".join(changed)); st.rerun()
-            else: st.info("No detecté un cambio concreto que aplicar.")
-        except Exception as e: st.error(f"No pude actualizar el perfil: {e}")
-
-    dictated_prompt=voice_input_component(key="chat_stt")
+    voice_input_component(key="chat_stt")
+    st.caption("Habla, y cuando termine copiará el texto — pégalo abajo con Ctrl+V / Cmd+V.")
 
     for m in get_chat(profile["id"],30):
         with st.chat_message("assistant" if m["role"]=="assistant" else "user"):st.markdown(m["content"])
     prompt=st.chat_input("Pregunta sobre comida...")
-    if not prompt and dictated_prompt:
-        prompt=dictated_prompt
     if prompt:
         with st.chat_message("user"):st.markdown(prompt)
         try:ans=ksc_chat(profile,prompt)
         except Exception as e:ans="No pude responder ahora mismo: "+str(e)
         add_chat(profile["id"],"user",prompt);add_chat(profile["id"],"assistant",ans)
         with st.chat_message("assistant"):
-            render_ai_response(f"Tu pregunta fue: {prompt}. {ans}", autoplay=True, key=f"chat_tts_{len(get_chat(profile['id']))}")
+            st.markdown(ans)
+            voice_reader_component(ans, autoplay=voice_on, key=f"chat_tts_{len(get_chat(profile['id']))}")
     st.markdown("###  Memoria alimentaria")
     for m in memories(profile["id"]):st.write("•",m)
 
@@ -2404,7 +2057,7 @@ elif page==" Plan semanal":
         for x in plan.get("shopping_list",[]):st.write("•",x)
         c1,c2=st.columns(2)
         if c1.button("Guardar plan"):save_plan(profile["id"],week,plan);st.success("Guardado")
-        html="<html><body><h1>Plan semanal FitGlass</h1>"+pd.DataFrame(days).to_html(index=False)+"<h2>Compras</h2><ul>"+"".join(f"<li>{x}</li>" for x in plan.get("shopping_list",[]))+"</ul></body></html>"
+        html="<html><body><h1>Plan semanal IA KSC</h1>"+pd.DataFrame(days).to_html(index=False)+"<h2>Compras</h2><ul>"+"".join(f"<li>{x}</li>" for x in plan.get("shopping_list",[]))+"</ul></body></html>"
         c2.download_button("Exportar HTML",html.encode(),file_name="plan_IA_KSC.html",mime="text/html",use_container_width=True)
 
 # ============================================================
@@ -2428,7 +2081,7 @@ elif page==" Agua & hábitos":
     st.progress(done_n/len(goals) if goals else 0);st.caption(f"{done_n}/{len(goals)} retos completados hoy")
     for g in goals:
         with st.container(border=True):
-            a,b=st.columns([.8,.2]);a.write(("" if g["completed"] else "")+g["goal_name"])
+            a,b=st.columns([.8,.2]);a.write((" " if g["completed"] else "⬜ ")+g["goal_name"])
             if not g["completed"] and b.button("Completar",key=f"goal_{g['id']}"):complete_goal(g["id"],profile["id"]);st.rerun()
 
 # ============================================================
@@ -2458,7 +2111,7 @@ elif page==" Recompensas KSC":
     -  Registrar peso: **+5**
     -  Registrar medidas: **+5**
     - Guardar receta favorita: **+5**
-    - Calificar receta: **+3**
+    - ⭐ Calificar receta: **+3**
     -  Generar plan semanal: **+20**
     -  Cada push-up en la Arena: **+1** (mínimo 10 por intento)
     -  Cada respuesta correcta del quiz: **según nivel**
@@ -2550,11 +2203,11 @@ elif page==" Mi progreso":
         if logs:st.dataframe(pd.DataFrame(logs),hide_index=True,use_container_width=True)
 
 # ============================================================
-# ACADEMIA FITGLASS (QUIZ CON NIVELES)
+# ACADEMIA KSC (QUIZ CON NIVELES)
 # ============================================================
 
-elif page==" Academia FitGlass (quiz)":
-    section("EDUCACIÓN","Academia FitGlass","Aprende sobre nutrición, sube de nivel y gana puntos extra.")
+elif page==" Academia KSC (quiz)":
+    section("EDUCACIÓN","Academia KSC","Aprende sobre nutrición, sube de nivel y gana puntos extra.")
 
     QUIZ_LEVELS = {
         " Básico": {
@@ -2636,14 +2289,14 @@ elif page==" Configuración":
     st.markdown(textwrap.dedent(f"""
     <div class="stat-card {'accent-green' if ok else 'accent-orange'}" style="max-width:420px">
       <span class="icon">{'' if ok else ''}</span>
-      <div class="label">Estado de FitGlass</div>
+      <div class="label">Estado de IA KSC</div>
       <div class="value" style="font-size:1.1rem">{'GROQ_API_KEY encontrada' if ok else 'Falta GROQ_API_KEY'}</div>
     </div>"""),unsafe_allow_html=True)
     st.code('GROQ_API_KEY = "TU_TOKEN"\n# opcional:\nUSDA_API_KEY = "TU_CLAVE_USDA"',language="toml")
     if st.button("Probar IA",type="primary"):
         try:
             ids={m.id for m in ai_client(ai_key()).models.list().data}
-            st.success("FitGlass lista." if AI_MODEL in ids else "Conexión OK, modelo no visible.")
+            st.success("IA KSC lista." if AI_MODEL in ids else "Conexión OK, modelo no visible.")
         except Exception as e:st.error(str(e))
     st.markdown("###  Arena Push-Up (cámara con esqueleto)")
     st.code("pip install streamlit-webrtc mediapipe av opencv-python-headless",language="powershell")
@@ -2653,4 +2306,4 @@ elif page==" Configuración":
     st.caption("Usa la base pública y gratuita Open Food Facts. Los productos consultados se guardan en caché local (.ksc_data/barcode_cache.json) para funcionar más rápido la próxima vez.")
     st.markdown("###  Persistencia de datos")
     st.info("Todos los perfiles, comidas, puntos y retos se guardan en .ksc_data/ dentro del servidor donde corre la app. No se borran al cerrar el navegador. Si despliegas en un hosting con almacenamiento temporal, monta un volumen persistente en esa carpeta.")
-    st.info("FitGlass es un asistente nutricional educativo. Encargados actuales: Requena Núñez Juan Carlos, André y Atarama Sebastián. Créditos del proyecto: César y Alexander.")
+    st.info("IA KSC es un asistente nutricional educativo diseñado por los alumnos César Zapata, Alex Timaná García, Atarama Portocarrero y André Requena.")
