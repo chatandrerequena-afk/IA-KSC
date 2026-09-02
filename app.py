@@ -591,7 +591,7 @@ def init_db():
     """)
     ensure_col(con, "profiles", "pin_hash TEXT DEFAULT ''")
     ensure_col(con, "profiles", "water_goal_ml INTEGER DEFAULT 2000")
-    ensure_col(con,  "app_version TEXT DEFAULT ''")
+    ensure_col(con, "profiles", "app_version TEXT DEFAULT ''")
     ensure_col(con, "quiz_results", "level TEXT DEFAULT 'Básico'")
     ensure_col(con, "profiles", "diet_style TEXT DEFAULT 'Omnívora'")
     ensure_col(con, "profiles", "intolerances TEXT DEFAULT ''")
