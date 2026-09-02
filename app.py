@@ -5,6 +5,7 @@ import json
 import math
 import time
 import base64
+import calendar as pycalendar
 import hashlib
 import html
 import secrets as pysecrets
@@ -27,6 +28,7 @@ from groq import Groq, AuthenticationError, RateLimitError, APIConnectionError, 
 
 APP_VERSION = "8.0"
 AI_MODEL = "qwen/qwen3.6-27b"
+AI_CHAT_FALLBACK_MODELS = ["qwen/qwen3.6-27b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
 USDA_BASE = "https://api.nal.usda.gov/fdc/v1"
 OFF_BASE = "https://world.openfoodfacts.org/api/v2/product"
 
@@ -745,12 +747,20 @@ def usage_days(pid):
     con.close(); return dates
 
 def streak_calendar(pid, days=35):
+    """Compatibilidad: mantiene estados recientes; la interfaz usa un calendario mensual real."""
     end=date.today(); start=end-timedelta(days=days-1); out=[]; d=start
     while d<=end:
-        stt=streak_status(pid,d); status="perfect" if stt["perfect"] else "nutrition" if stt["nutrition"] else "active" if stt["active"] else "empty"
-        out.append({"date":d,"status":status})
-        d+=timedelta(days=1)
+        stt=streak_status(pid,d)
+        status="perfect" if stt["perfect"] else "nutrition" if stt["nutrition"] else "active" if stt["active"] else "empty"
+        out.append({"date":d,"status":status}); d+=timedelta(days=1)
     return out
+
+def real_month_calendar_data(pid, year, month):
+    matrix=pycalendar.monthcalendar(year, month)
+    con=db(); prefix=f"{year:04d}-{month:02d}-%"
+    meals_by_day={r["meal_date"]:{"count":int(r["c"]),"kcal":float(r["kcal"] or 0)} for r in con.execute("SELECT meal_date,COUNT(*) c,COALESCE(SUM(kcal),0) kcal FROM meal_diary WHERE profile_id=? AND meal_date LIKE ? GROUP BY meal_date",(pid,prefix)).fetchall()}
+    water_by_day={r["log_date"]:int(r["ml"] or 0) for r in con.execute("SELECT log_date,COALESCE(SUM(ml),0) ml FROM hydration WHERE profile_id=? AND log_date LIKE ? GROUP BY log_date",(pid,prefix)).fetchall()}
+    con.close(); return matrix,meals_by_day,water_by_day
 
 def leaderboard():
     con=db()
@@ -1078,21 +1088,48 @@ def coach_fallback(p,text):
     return "Puedo seguir ayudándote con alimentación, nutrición y tu perfil. En este momento no pude consultar al asistente, pero puedo darte una orientación basada en los datos que ya tienes guardados."
 
 def ksc_chat(p,text):
-    if not ai_key():raise RuntimeError("Falta GROQ_API_KEY.")
-    msgs=[{"role":"system","content":system_prompt(p)}]+get_chat(p["id"],16)+[{"role":"user","content":text}]
-    try:
-        r=ai_client(ai_key()).chat.completions.create(
-            model=AI_MODEL,messages=msgs,temperature=.55,top_p=.85,
-            max_completion_tokens=2200,reasoning_effort="none",stream=False
-        )
-        ans=(r.choices[0].message.content or "").strip()
-        maybe_memory(p["id"],text)
-        return ans
-    except AuthenticationError as e:raise RuntimeError("La clave de IA no es válida.") from e
-    except RateLimitError:
+    """Coach robusto: reintenta y cambia de modelo antes de caer al modo local."""
+    key=ai_key()
+    if not key:
         return coach_fallback(p,text)
-    except APIConnectionError as e:raise RuntimeError("No se pudo conectar con FitGlass.") from e
-    except BadRequestError as e:raise RuntimeError(f"No se pudo procesar: {e}") from e
+    history=get_chat(p["id"],10)
+    msgs=[{"role":"system","content":system_prompt(p)}]+history+[{
+        "role":"user","content":str(text or "").strip()
+    }]
+    last_error=None
+    for model in AI_CHAT_FALLBACK_MODELS:
+        for attempt in range(2):
+            try:
+                r=ai_client(key).chat.completions.create(
+                    model=model,
+                    messages=msgs,
+                    temperature=.48,
+                    top_p=.9,
+                    max_completion_tokens=1400,
+                    reasoning_effort="none",
+                    stream=False,
+                )
+                ans=(r.choices[0].message.content or "").strip()
+                if ans:
+                    maybe_memory(p["id"],text)
+                    return ans
+                last_error=RuntimeError("Respuesta vacía del asistente")
+            except RateLimitError as e:
+                last_error=e
+                time.sleep(0.35*(attempt+1))
+                continue
+            except (APIConnectionError, BadRequestError) as e:
+                last_error=e
+                time.sleep(0.25*(attempt+1))
+                break
+            except AuthenticationError as e:
+                raise RuntimeError("Hubo un error.") from e
+            except Exception as e:
+                last_error=e
+                time.sleep(0.2*(attempt+1))
+                break
+    # Nunca dejar el Coach en blanco.
+    return coach_fallback(p,text)
 
 def ai_json(prompt,jpeg=None,max_tokens=1800):
     if not ai_key():raise RuntimeError("Falta GROQ_API_KEY.")
@@ -1570,26 +1607,79 @@ def render_assistant_avatar(size=46):
     return f"<img class='fg-chat-avatar assistant' src='data:image/svg+xml;base64,{b64}' width='{size}' height='{size}' alt='FitGlass'>"
 
 def render_ai_response(text, key="fitglass_ai", autoplay=True):
-    """Generate TTS first; only then reveal the assistant text and play audio together."""
+    """Prepara el TTS primero y sincroniza comienzo de audio + escritura del mensaje."""
     clean=str(text or "").strip()
-    if not clean:return
+    if not clean:
+        return
     audio=None
-    loading=st.empty()
-    loading.markdown("<div class='fg-ai-loading'><span class='fg-loader'></span><div><b>FitGlass está preparando tu respuesta</b><small>Preparando una respuesta sincronizada</small></div></div>",unsafe_allow_html=True)
     try:
         audio=eleven_tts(clean,eleven_voice_id()) if eleven_key() else None
     except Exception:
         audio=None
-    loading.empty()
     if not audio:
-        st.markdown(f"<div class='ai-message typing-fallback'>{html.escape(clean).replace(chr(10),'<br>')}</div>",unsafe_allow_html=True)
+        # Modo degradado: el Coach sigue funcionando aunque TTS esté temporalmente fuera de servicio.
+        safe=html.escape(clean).replace(chr(10),'<br>')
+        st.markdown(f"<div class='fg-ai-shell'><div class='fg-ai-meta'><span class='fg-ai-dot'></span><span>FitGlass</span></div><div class='fg-ai-text'>{safe}</div></div>",unsafe_allow_html=True)
         return
-    b64=base64.b64encode(audio).decode();safe_key=re.sub(r"[^a-zA-Z0-9_]","_",key);payload=json.dumps(clean,ensure_ascii=False)
+    b64=base64.b64encode(audio).decode()
+    safe_key=re.sub(r"[^a-zA-Z0-9_]","_",key)
+    payload=json.dumps(clean,ensure_ascii=False)
     components.html(f"""
-<div class='fg-ai-shell' id='fgai_{safe_key}'><div class='fg-ai-meta'><span class='fg-ai-dot'></span><span>FitGlass</span><button id='fgmute_{safe_key}'>Silenciar</button></div><div class='fg-ai-text' id='fgtext_{safe_key}'></div></div>
-<script>(function(){{const out=document.getElementById('fgtext_{safe_key}');const btn=document.getElementById('fgmute_{safe_key}');const text={payload};const audio=new Audio('data:audio/mp3;base64,{b64}');let muted=false;btn.onclick=()=>{{muted=!muted;audio.muted=muted;btn.textContent=muted?'Activar voz':'Silenciar';}};const parts=text.split(/(\\s+)/);let i=0;function type(){{if(i<parts.length){{out.insertAdjacentText('beforeend',parts[i]);i++;setTimeout(type,parts[i-1].trim()?20:0);}}}}if({str(bool(autoplay)).lower()}){{audio.play().catch(()=>{{}});}}type();}})();</script>
-<style>.fg-ai-loading{{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(135deg,rgba(255,255,255,.075),rgba(255,255,255,.025));backdrop-filter:blur(22px) saturate(165%);color:#e8f8ef;margin-bottom:8px}}.fg-ai-loading b{{display:block;color:#fff;font-size:13px}}.fg-ai-loading small{{display:block;color:#8eaa9c;font-size:11px;margin-top:3px}}.fg-loader{{width:20px;height:20px;border-radius:50%;border:2px solid rgba(255,255,255,.14);border-top-color:#7effbd;border-right-color:#8eb6ff;animation:fgspin .85s linear infinite}}@keyframes fgspin{{to{{transform:rotate(360deg)}}}}.fg-ai-shell{{position:relative;font-family:Manrope,-apple-system,BlinkMacSystemFont,sans-serif;padding:16px 18px;border-radius:20px;border:1px solid rgba(255,255,255,.13);background:linear-gradient(135deg,rgba(255,255,255,.095),rgba(255,255,255,.035));backdrop-filter:blur(26px) saturate(175%);box-shadow:0 20px 60px rgba(0,0,0,.2);color:#edf9f2}}.fg-ai-meta{{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:850;color:#b5cfc1}}.fg-ai-meta button{{margin-left:auto;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;border-radius:999px;padding:6px 11px;font-weight:800;cursor:pointer}}.fg-ai-dot{{width:7px;height:7px;border-radius:50%;background:#7effbd;box-shadow:0 0 15px rgba(126,255,189,.85)}}.fg-ai-text{{margin-top:12px;font-size:14px;line-height:1.72;color:#f0faf4;white-space:pre-wrap}}</style>
-""",height=max(100,min(460,120+len(clean)//2)))
+<div class='fg-ai-shell' id='fgai_{safe_key}'>
+  <div class='fg-ai-meta'>
+    <span class='fg-ai-dot'></span><span>FitGlass</span>
+    <button id='fgmute_{safe_key}' type='button'>Silenciar</button>
+  </div>
+  <div class='fg-ai-text' id='fgtext_{safe_key}'></div>
+  <audio id='fgaudio_{safe_key}' preload='auto' autoplay></audio>
+</div>
+<script>
+(function(){{
+  const shell=document.getElementById('fgai_{safe_key}');
+  const out=document.getElementById('fgtext_{safe_key}');
+  const btn=document.getElementById('fgmute_{safe_key}');
+  const audio=document.getElementById('fgaudio_{safe_key}');
+  const text={payload};
+  const src='data:audio/mp3;base64,{b64}';
+  let started=false, muted=false;
+  audio.src=src;
+  audio.preload='auto';
+  function startTogether(){{
+    if(started)return;
+    started=true;
+    const words=text.split(/(\\s+)/); let i=0;
+    function typeNext(){{
+      if(i>=words.length)return;
+      out.insertAdjacentText('beforeend',words[i]);
+      const chunk=words[i++];
+      setTimeout(typeNext, chunk.trim()?18:0);
+    }}
+    audio.muted=muted;
+    const playPromise=audio.play();
+    if(playPromise && playPromise.catch)playPromise.catch(()=>{{
+      // La política del navegador puede bloquear autoplay. Una interacción posterior reanuda audio y texto juntos.
+      started=false;
+      const resume=()=>{{document.removeEventListener('pointerdown',resume);startTogether();}};
+      document.addEventListener('pointerdown',resume,{{once:true}});
+    }});
+    typeNext();
+  }}
+  audio.addEventListener('canplaythrough',startTogether,{{once:true}});
+  audio.addEventListener('loadeddata',()=>{{setTimeout(startTogether,60);}},{{once:true}});
+  btn.onclick=()=>{{muted=!muted;audio.muted=muted;btn.textContent=muted?'Activar voz':'Silenciar';}};
+  // Intento inmediato por si el navegador ya permite autoplay después de la interacción que generó el mensaje.
+  setTimeout(startTogether,100);
+}})();
+</script>
+<style>
+.fg-ai-shell{{position:relative;font-family:Manrope,-apple-system,BlinkMacSystemFont,sans-serif;padding:16px 18px;border-radius:22px;border:1px solid rgba(255,255,255,.14);background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(255,255,255,.032));backdrop-filter:blur(28px) saturate(180%);box-shadow:0 22px 70px rgba(0,0,0,.22);color:#edf9f2}}
+.fg-ai-meta{{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:850;color:#b5cfc1}}
+.fg-ai-meta button{{margin-left:auto;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.065);color:#fff;border-radius:999px;padding:6px 11px;font-weight:800;cursor:pointer}}
+.fg-ai-dot{{width:7px;height:7px;border-radius:50%;background:#7effbd;box-shadow:0 0 16px rgba(126,255,189,.9);animation:fgdot 1.2s ease-in-out infinite}}
+@keyframes fgdot{{0%,100%{{transform:scale(.86);opacity:.65}}50%{{transform:scale(1.15);opacity:1}}}}
+.fg-ai-text{{margin-top:12px;font-size:14px;line-height:1.72;color:#f0faf4;white-space:pre-wrap;min-height:24px}}
+</style>
+""",height=max(110,min(500,130+len(clean)//2)))
 
 def voice_reader_component(text, voice_hint="female", rate=1.0, autoplay=True, key="tts"):
     render_ai_response(text,key=key,autoplay=autoplay)
@@ -1638,53 +1728,64 @@ def browser_reminders(p):
     components.html(f"<script>(function(){{const send=()=>{{if(!('Notification'in window))return;if(Notification.permission==='default')Notification.requestPermission();if(Notification.permission==='granted')new Notification('FitGlass',{{body:{msg}}});}};setTimeout(send,1800);}})();</script>",height=1)
 
 def render_streak_calendar(pid):
-    data=streak_calendar(pid,35)
-    today=date.today()
+    today=date.today(); current=st.session_state.get("calendar_month",today.replace(day=1))
+    if isinstance(current,str):
+        try: current=date.fromisoformat(current)
+        except Exception: current=today.replace(day=1)
+    current=current.replace(day=1)
+    matrix,meals_by_day,water_by_day=real_month_calendar_data(pid,current.year,current.month)
+    month_name=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][current.month-1]
+    st.markdown(f"<div class='glass-surface' style='padding:22px;margin-top:16px'><div class='kicker'>CALENDARIO REAL</div><div style='display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap'><div><div style='font-size:1.35rem;font-weight:900;color:#fff'>{month_name} {current.year}</div><div class='form-hint'>Hoy: {today.strftime('%d/%m/%Y')} · {['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][today.weekday()]}</div></div><div class='calendar-duration'>{len(usage_days(pid))} días usando FitGlass</div></div></div>",unsafe_allow_html=True)
+    a,b,c=st.columns(3)
+    if a.button("‹",key=f"calprev_{pid}",use_container_width=True):
+        st.session_state.calendar_month=(current-timedelta(days=1)).replace(day=1); st.rerun()
+    if b.button("Hoy",key=f"caltoday_{pid}",use_container_width=True):
+        st.session_state.calendar_month=today.replace(day=1); st.session_state.calendar_selected_date=today; st.rerun()
+    if c.button("›",key=f"calnext_{pid}",use_container_width=True):
+        st.session_state.calendar_month=(current+timedelta(days=32)).replace(day=1); st.rerun()
+    st.markdown("<div class='fg-calendar-head'>"+"".join(f"<span>{x}</span>" for x in ['L','M','X','J','V','S','D'])+"</div>",unsafe_allow_html=True)
     selected=st.session_state.get("calendar_selected_date",today)
     if isinstance(selected,str):
-        try:selected=date.fromisoformat(selected)
-        except Exception:selected=today
-    st.markdown(f"""<div class='glass-surface' style='padding:22px;margin-top:16px'>
-<div class='kicker'>CONSTANCIA</div><div style='display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap'><div><div style='font-size:1.35rem;font-weight:900;color:#fff'>Calendario de rachas</div><div class='form-hint'>A = activa · N = nutricional · P = perfecta</div></div><div class='calendar-duration'>{len(usage_days(pid))} días usando FitGlass</div></div></div>""",unsafe_allow_html=True)
-    weekday_labels=["L","M","X","J","V","S","D"]
-    st.markdown("<div class='fg-calendar-head'>"+"".join(f"<span>{x}</span>" for x in weekday_labels)+"</div>",unsafe_allow_html=True)
-    by_date={x["date"]:x for x in data}
-    start_date=data[0]["date"]
-    while start_date.weekday()!=0:start_date-=timedelta(days=1)
-    cursor=start_date
-    for _ in range(5):
+        try: selected=date.fromisoformat(selected)
+        except Exception: selected=today
+    for week in matrix:
         cols=st.columns(7,gap="small")
-        for i,col in enumerate(cols):
-            d=cursor+timedelta(days=i)
-            stt=by_date.get(d,{"status":"empty"})
-            status=stt.get("status","empty")
-            mark={"perfect":"P","nutrition":"N","active":"A","empty":""}.get(status,"")
-            display=f"{d.day}{(' · '+mark) if mark else ''}"
-            with col:
-                if st.button(display,key=f"cal_{pid}_{d.isoformat()}",disabled=d>today,use_container_width=True):
-                    st.session_state["calendar_selected_date"]=d
-                    st.rerun()
-                st.markdown(f"<div class='fg-cal-state {status}'></div>",unsafe_allow_html=True)
-        cursor+=timedelta(days=7)
-    sst=streak_status(pid,selected);totals,_=day_totals(pid,selected)
-    weekday=selected.strftime("%A")
-    weekday_es={"Monday":"Lunes","Tuesday":"Martes","Wednesday":"Miércoles","Thursday":"Jueves","Friday":"Viernes","Saturday":"Sábado","Sunday":"Domingo"}.get(weekday,weekday)
-    st.markdown(f"""<div class='glass-surface calendar-day-detail'><div class='kicker'>{weekday_es.upper()}</div><div class='calendar-detail-title'>{selected.strftime('%d/%m/%Y')}</div><div class='calendar-detail-metrics'><span>{sst['kcal']:.0f} kcal</span><span>{totals['protein']:.1f} g proteína</span><span>{sst['water']} ml agua</span></div><div class='form-hint'>Racha activa: {'sí' if sst['active'] else 'no'} · nutricional: {'sí' if sst['nutrition'] else 'no'} · perfecta: {'sí' if sst['perfect'] else 'no'}</div></div>""",unsafe_allow_html=True)
-    _, meals=day_totals(pid,selected)
+        for i,daynum in enumerate(week):
+            with cols[i]:
+                if not daynum:
+                    st.markdown("<div class='cal-empty'></div>",unsafe_allow_html=True); continue
+                d=date(current.year,current.month,daynum)
+                stt=streak_status(pid,d) if d<=today else {"perfect":False,"nutrition":False,"active":False}
+                status="perfect" if stt["perfect"] else "nutrition" if stt["nutrition"] else "active" if stt["active"] else "empty"
+                label=str(daynum)
+                if d==today: label=f"{daynum} · hoy"
+                if st.button(label,key=f"realcal_{pid}_{d.isoformat()}",disabled=d>today,use_container_width=True):
+                    st.session_state.calendar_selected_date=d; st.rerun()
+                rec=meals_by_day.get(d.isoformat(),{}); water=water_by_day.get(d.isoformat(),0)
+                st.markdown(f"<div class='cal-cell {status}{' today' if d==today else ''}' title='{rec.get('count',0)} comidas · {rec.get('kcal',0):.0f} kcal · {water} ml'></div>",unsafe_allow_html=True)
+    sst=streak_status(pid,selected) if selected<=today else {"active":False,"nutrition":False,"perfect":False,"water":0}
+    totals,meals=day_totals(pid,selected); weekday=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][selected.weekday()]
+    st.markdown(f"<div class='glass-surface calendar-day-detail'><div class='kicker'>{weekday.upper()}</div><div class='calendar-detail-title'>{selected.strftime('%d/%m/%Y')}</div><div class='calendar-detail-metrics'><span>{totals['kcal']:.0f} kcal</span><span>{totals['protein']:.1f} g proteína</span><span>{sst.get('water',0)} ml agua</span><span>{len(meals)} comidas</span></div><div class='form-hint'>Racha activa: {'sí' if sst['active'] else 'no'} · nutricional: {'sí' if sst['nutrition'] else 'no'} · perfecta: {'sí' if sst['perfect'] else 'no'}</div></div>",unsafe_allow_html=True)
     if meals:
-        st.markdown("<div class='history-title'>Comidas de este día</div>",unsafe_allow_html=True)
+        st.markdown("<div class='history-title'>Historial de comidas</div>",unsafe_allow_html=True)
         for m in meals:
-            img=m.get("image_path");c1,c2=st.columns([0.22,0.78])
+            img=m.get("image_path"); c1,c2=st.columns([0.22,0.78])
             with c1:
-                if img and Path(img).exists():st.image(img,use_container_width=True)
-                else:st.markdown("<div class='history-photo-placeholder'>Foto</div>",unsafe_allow_html=True)
+                if img and Path(img).exists(): st.image(img,use_container_width=True)
+                else: st.markdown("<div class='history-photo-placeholder'>Sin foto</div>",unsafe_allow_html=True)
             with c2:
-                title=html.escape(str(m.get("title") or "Comida"));typ=html.escape(str(m.get("meal_type") or ""));tm=html.escape(str(m.get("meal_time") or ""))
-                st.markdown(f"""<div class='history-meal'><div class='history-meal-title'>{title}</div><div class='history-meal-meta'>{typ} · {tm}</div><div class='history-meal-kcal'>{num(m.get('kcal')):.0f} kcal</div><div class='history-meal-macros'>Proteína {num(m.get('protein')):.1f} g · Carbohidratos {num(m.get('carbs')):.1f} g · Grasas {num(m.get('fat')):.1f} g · Fibra {num(m.get('fiber')):.1f} g</div></div>""",unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='note'>No hay comidas registradas en este día.</div>",unsafe_allow_html=True)
+                st.markdown(f"<div class='history-meal'><div class='history-meal-title'>{html.escape(str(m.get('title') or 'Comida'))}</div><div class='history-meal-meta'>{html.escape(str(m.get('meal_type') or ''))} · {html.escape(str(m.get('meal_time') or ''))}</div><div class='history-meal-kcal'>{num(m.get('kcal')):.0f} kcal</div><div class='history-meal-macros'>Proteína {num(m.get('protein')):.1f} g · Carbohidratos {num(m.get('carbs')):.1f} g · Grasas {num(m.get('fat')):.1f} g · Fibra {num(m.get('fiber')):.1f} g</div></div>",unsafe_allow_html=True)
+    else: st.markdown("<div class='note'>No hay comidas registradas en este día.</div>",unsafe_allow_html=True)
 
-st.markdown('<style>.voice-glass{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:linear-gradient(135deg,rgba(255,255,255,.10),rgba(255,255,255,.04));backdrop-filter:blur(24px) saturate(170%);margin-top:10px}.voice-glass button{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#fff;border-radius:999px;padding:7px 12px;font-weight:800}.voice-glass span{color:#a7c7b7;font-size:.78rem}.streak-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}.streak-metrics>div{padding:12px 14px;border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.045)}.streak-metrics b{display:block;color:#fff;font-size:1.5rem}.streak-metrics span{color:#9eb8aa;font-size:.75rem}.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.fg-calendar-head{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:12px 0 6px}.fg-calendar-head span{text-align:center;color:#77988a;font-weight:850;font-size:.72rem}.calendar-duration{font-size:.76rem;color:#9fb7aa}.calendar-day-detail{padding:18px;margin-top:12px}.calendar-detail-title{font-size:1.55rem;color:#fff;font-weight:900;margin-top:2px}.calendar-detail-metrics{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.calendar-detail-metrics span{padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);color:#d8ebe2;font-size:.76rem;font-weight:800}.history-title{font-size:1rem;font-weight:900;color:#fff;margin:18px 0 10px}.history-meal{padding:14px 16px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.075),rgba(255,255,255,.028));backdrop-filter:blur(20px);margin-bottom:10px}.history-meal-title{font-weight:900;color:#fff;font-size:1rem}.history-meal-meta{color:#8fac9e;font-size:.76rem;margin-top:3px}.history-meal-kcal{color:#7effbd;font-size:1.15rem;font-weight:900;margin-top:9px}.history-meal-macros{color:#b8cec2;font-size:.74rem;margin-top:4px;line-height:1.5}.history-photo-placeholder{height:78px;border-radius:16px;display:grid;place-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:#8aa798;font-size:.7rem}.fg-cal-state{height:3px;border-radius:99px;margin:-5px 8px 8px;box-shadow:0 0 12px currentColor}.fg-cal-state.perfect{background:#b697ff;color:#b697ff}.fg-cal-state.nutrition{background:#8eb6ff;color:#8eb6ff}.fg-cal-state.active{background:#7effbd;color:#7effbd}.fg-cal-state.empty{background:transparent;box-shadow:none}@media(max-width:760px){.fg-calendar-head{gap:3px}.fg-calendar-head span{font-size:.64rem}.calendar-detail-metrics{gap:6px}.calendar-detail-metrics span{font-size:.67rem;padding:7px 8px}}.cal-cell{aspect-ratio:1;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);display:grid;place-items:center;color:#aac4b4;font-weight:800}.cal-cell.active{background:rgba(110,255,188,.18);border-color:rgba(110,255,188,.30);color:#d9fff0}.cal-cell.nutrition{background:rgba(120,165,255,.20);border-color:rgba(120,165,255,.36);color:#e7efff}.cal-cell.perfect{background:linear-gradient(135deg,rgba(182,132,255,.30),rgba(110,255,188,.18));border-color:rgba(194,157,255,.48);color:#fff}.cal-cell span{font-size:.78rem}.region-note{padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.03));color:#c5d9ce;line-height:1.55}.analysis-card{padding:24px;border-radius:24px;background:radial-gradient(circle at 50% 0,rgba(120,165,255,.18),transparent 55%),linear-gradient(135deg,rgba(255,255,255,.10),rgba(255,255,255,.035));border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 70px rgba(0,0,0,.24);backdrop-filter:blur(28px) saturate(175%);text-align:center}.analysis-orb{width:86px;height:86px;border-radius:50%;margin:0 auto 16px;background:radial-gradient(circle at 35% 30%,#fff,rgba(129,255,200,.75) 18%,rgba(104,155,255,.28) 45%,transparent 70%);box-shadow:0 0 45px rgba(110,220,255,.28);animation:analysisPulse 1.7s ease-in-out infinite}.analysis-ring{width:124px;height:124px;border-radius:50%;margin:0 auto 16px;border:1px solid rgba(255,255,255,.15);box-shadow:inset 0 0 25px rgba(130,255,210,.15),0 0 45px rgba(120,170,255,.10);animation:analysisRotate 2.8s linear infinite}@keyframes analysisPulse{0%,100%{transform:scale(.92);opacity:.7}50%{transform:scale(1.08);opacity:1}}@keyframes analysisRotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style>', unsafe_allow_html=True)
+st.markdown('<style>.voice-glass{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:linear-gradient(135deg,rgba(255,255,255,.10),rgba(255,255,255,.04));backdrop-filter:blur(24px) saturate(170%);margin-top:10px}.voice-glass button{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#fff;border-radius:999px;padding:7px 12px;font-weight:800}.voice-glass span{color:#a7c7b7;font-size:.78rem}.streak-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}.streak-metrics>div{padding:12px 14px;border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.045)}.streak-metrics b{display:block;color:#fff;font-size:1.5rem}.streak-metrics span{color:#9eb8aa;font-size:.75rem}.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.fg-calendar-head{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:12px 0 6px}.fg-calendar-head span{text-align:center;color:#77988a;font-weight:850;font-size:.72rem}.calendar-duration{font-size:.76rem;color:#9fb7aa}.calendar-day-detail{padding:18px;margin-top:12px}.calendar-detail-title{font-size:1.55rem;color:#fff;font-weight:900;margin-top:2px}.calendar-detail-metrics{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.calendar-detail-metrics span{padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);color:#d8ebe2;font-size:.76rem;font-weight:800}.history-title{font-size:1rem;font-weight:900;color:#fff;margin:18px 0 10px}.history-meal{padding:14px 16px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.075),rgba(255,255,255,.028));backdrop-filter:blur(20px);margin-bottom:10px}.history-meal-title{font-weight:900;color:#fff;font-size:1rem}.history-meal-meta{color:#8fac9e;font-size:.76rem;margin-top:3px}.history-meal-kcal{color:#7effbd;font-size:1.15rem;font-weight:900;margin-top:9px}.history-meal-macros{color:#b8cec2;font-size:.74rem;margin-top:4px;line-height:1.5}.history-photo-placeholder{height:78px;border-radius:16px;display:grid;place-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:#8aa798;font-size:.7rem}.fg-cal-state{height:3px;border-radius:99px;margin:-5px 8px 8px;box-shadow:0 0 12px currentColor}.fg-cal-state.perfect{background:#b697ff;color:#b697ff}.fg-cal-state.nutrition{background:#8eb6ff;color:#8eb6ff}.fg-cal-state.active{background:#7effbd;color:#7effbd}.fg-cal-state.empty{background:transparent;box-shadow:none}@media(max-width:760px){.fg-calendar-head{gap:3px}.fg-calendar-head span{font-size:.64rem}.calendar-detail-metrics{gap:6px}.calendar-detail-metrics span{font-size:.67rem;padding:7px 8px}}.cal-empty{height:42px}.cal-cell.today{box-shadow:0 0 0 2px rgba(255,255,255,.88),0 0 24px rgba(126,255,189,.24);transform:translateY(-1px)}.cal-cell{aspect-ratio:1;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);display:grid;place-items:center;color:#aac4b4;font-weight:800}.cal-cell.active{background:rgba(110,255,188,.18);border-color:rgba(110,255,188,.30);color:#d9fff0}.cal-cell.nutrition{background:rgba(120,165,255,.20);border-color:rgba(120,165,255,.36);color:#e7efff}.cal-cell.perfect{background:linear-gradient(135deg,rgba(182,132,255,.30),rgba(110,255,188,.18));border-color:rgba(194,157,255,.48);color:#fff}.cal-cell span{font-size:.78rem}.region-note{padding:14px 16px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.03));color:#c5d9ce;line-height:1.55}.analysis-card{padding:24px;border-radius:24px;background:radial-gradient(circle at 50% 0,rgba(120,165,255,.18),transparent 55%),linear-gradient(135deg,rgba(255,255,255,.10),rgba(255,255,255,.035));border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 70px rgba(0,0,0,.24);backdrop-filter:blur(28px) saturate(175%);text-align:center}.analysis-orb{width:86px;height:86px;border-radius:50%;margin:0 auto 16px;background:radial-gradient(circle at 35% 30%,#fff,rgba(129,255,200,.75) 18%,rgba(104,155,255,.28) 45%,transparent 70%);box-shadow:0 0 45px rgba(110,220,255,.28);animation:analysisPulse 1.7s ease-in-out infinite}.analysis-ring{width:124px;height:124px;border-radius:50%;margin:0 auto 16px;border:1px solid rgba(255,255,255,.15);box-shadow:inset 0 0 25px rgba(130,255,210,.15),0 0 45px rgba(120,170,255,.10);animation:analysisRotate 2.8s linear infinite}@keyframes analysisPulse{0%,100%{transform:scale(.92);opacity:.7}50%{transform:scale(1.08);opacity:1}}@keyframes analysisRotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style>', unsafe_allow_html=True)
+
+# ============================================================
+# BIENVENIDA POST-PERFIL
+# ============================================================
+def maybe_show_profile_welcome():
+    if st.session_state.get("pending_welcome") and not st.session_state.get("pending_welcome_shown"):
+        st.session_state["pending_welcome_shown"]=True
+        render_ai_response(st.session_state.pop("pending_welcome"),key="profile_welcome",autoplay=True)
 
 # ============================================================
 # UI
@@ -1910,6 +2011,7 @@ if not profiles:
 pid=st.session_state.get("pid")
 if pid not in [p["id"] for p in profiles]: pid=profiles[0]["id"];st.session_state["pid"]=pid
 profile=ensure_profile_targets(pid) or get_profile(pid)
+maybe_show_profile_welcome()
 render_topbar(profile)
 if st.session_state.get("welcome_summary"):
     welcome=st.session_state.pop("welcome_summary")
@@ -2136,11 +2238,13 @@ elif page==" Mi perfil":
             elif not re.fullmatch(r"\d{4}",pin or "") or pin!=pin2:st.error("PIN inválido o no coincide.")
             else:
                 pp=save_jpeg(photo.getvalue(),PROFILE_DIR,"profile",700) if photo else ""
+                tkcal,tprot,tcarb,tfat=calculate_targets(sex,int(age),float(height),float(weight),activity,goal)
                 pid=create_profile({"name":name.strip(),"age":int(age),"sex_energy":sex,"height_cm":height,"weight_kg":weight,
                     "activity":activity,"goal":goal,"favorite_foods":fav,"favorite_fruits":fr,"favorite_vegetables":veg,
                     "avoid_foods":avoid,"allergies":allerg,"special_state":special,"photo_path":pp,
-                    "pin_hash":hash_pin(pin),"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"region":region,"notes":"","reminders_enabled":1,"calorie_target":0,"protein_target":0,"carbs_target":0,"fat_target":0})
+                    "pin_hash":hash_pin(pin),"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"region":region,"notes":"","reminders_enabled":1,"calorie_target":tkcal,"protein_target":tprot,"carbs_target":tcarb,"fat_target":tfat})
                 add_points(pid,20,"Perfil creado");st.session_state["pid"]=pid;st.session_state[f"unlocked_{pid}"]=True
+                st.session_state["pending_welcome"]=personalized_plan_summary(get_profile(pid))+" También puedo explicarte tu IMC y cómo interpretar estas cifras."
                 st.success("Perfil creado y guardado permanentemente. ");st.rerun()
 
     with t2:
@@ -2416,7 +2520,13 @@ elif page==" Chat por voz con FitGlass":
 
     for m in get_chat(profile["id"],30):
         st.markdown(f"<div class='fg-chat-row {'assistant' if m['role']=='assistant' else 'user'}'>{render_assistant_avatar() if m['role']=='assistant' else render_profile_avatar(profile)}<div class='fg-chat-bubble'><div class='fg-chat-name'>{'FitGlass' if m['role']=='assistant' else html.escape(profile['name'])}</div><div>{m['content']}</div></div></div>",unsafe_allow_html=True)
-    prompt=st.chat_input("Pregunta sobre comida...")
+    csave1, csave2 = st.columns(2)
+    if csave1.button("Guardar chat",use_container_width=True,key="save_chat_now"):
+        st.session_state["chat_saved_at"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+        st.success("Chat guardado en tu perfil.")
+    if csave2.button("Borrar chat",use_container_width=True,key="clear_chat_now"):
+        con=db();con.execute("DELETE FROM chat_messages WHERE profile_id=?",(profile["id"],));con.commit();con.close();st.rerun()
+    prompt=st.chat_input("Pregunta sobre alimentación...")
     if not prompt and dictated_prompt:
         prompt=dictated_prompt
     if prompt:
@@ -2765,8 +2875,8 @@ elif page==" Configuración":
         except Exception as e:st.error(str(e))
     st.markdown("###  Arena Push-Up (cámara con esqueleto)")
     st.code("pip install streamlit-webrtc mediapipe av opencv-python-headless",language="powershell")
-    st.markdown("###  Voz (gratis, sin API key)")
-    st.caption("El chat usa la Web Speech API del navegador (Chrome recomendado) para leer respuestas y dictar por micrófono. No requiere ElevenLabs ni ninguna clave.")
+    st.markdown("###  Voz del asistente")
+    st.caption("FitGlass puede leer sus respuestas automáticamente cuando la voz esté disponible.")
     st.markdown("###  Código de barras")
     st.caption("Usa la base pública y gratuita Open Food Facts. Los productos consultados se guardan en caché local (.ksc_data/barcode_cache.json) para funcionar más rápido la próxima vez.")
     st.markdown("###  Persistencia de datos")
