@@ -1691,8 +1691,21 @@ def render_topbar(profile):
 OB_STEP_TITLES = ["Tu nombre y foto", "Cuerpo y energía", "Actividad y objetivo", "Alimentación", "Metas y acceso"]
 OB_TOTAL_STEPS = len(OB_STEP_TITLES)
 
+def _ob_data():
+    # Diccionario propio (NO es un key de widget) que sobrevive al cambiar
+    # de paso. Los session_state ligados a un widget (key="ob_xxx") se
+    # BORRAN automáticamente en cuanto ese widget deja de dibujarse (p.ej.
+    # al pasar del paso 1 al 2), así que nunca guardamos los datos ahí.
+    if "ob_data" not in st.session_state:
+        st.session_state["ob_data"] = {}
+    return st.session_state["ob_data"]
+
 def _ob_get(key, default):
-    return st.session_state.get(f"ob_{key}", default)
+    return _ob_data().get(key, default)
+
+def _ob_set(key, value):
+    _ob_data()[key] = value
+    return value
 
 def _ob_container(n):
     return st.container(key=f"ksc_step_{n}")
@@ -1719,6 +1732,7 @@ def onboarding():
         with _ob_container(1):
             st.markdown("### ¿Cómo te llamas?")
             name = st.text_input("Nombre", value=_ob_get("name", ""), placeholder="¿Cómo quieres que te llame?", key="ob_name")
+            _ob_set("name", name)
             st.markdown("### Tu foto de perfil (opcional)")
             st.caption("Una foto real tuya, no un ícono genérico. Puedes tomarla ahora o subir una y ajustarla luego.")
             src = st.radio("Fuente de la foto", ["Subir imagen", "Usar cámara"], horizontal=True, key="ob_photo_src", label_visibility="collapsed")
@@ -1742,8 +1756,11 @@ def onboarding():
             age = age_slider_input("Edad", "ob_age", default=_ob_get("age_val", 22), min_v=10, max_v=100)
             sex = st.selectbox("Sexo fisiológico para la estimación energética", ["Prefiero no indicar", "Masculino", "Femenino"],
                                 index=["Prefiero no indicar", "Masculino", "Femenino"].index(_ob_get("sex", "Prefiero no indicar")), key="ob_sex")
+            _ob_set("sex", sex)
             height = st.slider("Talla (cm)", 120.0, 230.0, float(_ob_get("height", 170.0)), 0.5, key="ob_height")
+            _ob_set("height", height)
             weight = st.slider("Peso (kg)", 30.0, 250.0, float(_ob_get("weight", 70.0)), 0.1, key="ob_weight")
+            _ob_set("weight", weight)
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
             if st.button("← Atrás", use_container_width=True, key="ob_back2"):
@@ -1758,8 +1775,10 @@ def onboarding():
         with _ob_container(3):
             activity = st.selectbox("Nivel de actividad", list(ACTIVITY_FACTORS),
                                      index=list(ACTIVITY_FACTORS).index(_ob_get("activity", list(ACTIVITY_FACTORS)[1])), key="ob_activity")
+            _ob_set("activity", activity)
             goal = st.selectbox("Objetivo", ["Mantener", "Perder peso", "Ganar masa muscular", "Ganar peso"],
                                  index=["Mantener", "Perder peso", "Ganar masa muscular", "Ganar peso"].index(_ob_get("goal", "Mantener")), key="ob_goal")
+            _ob_set("goal", goal)
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
             if st.button("← Atrás", use_container_width=True, key="ob_back3"):
@@ -1774,12 +1793,18 @@ def onboarding():
         with _ob_container(4):
             diet = st.selectbox("Patrón alimentario", ["Omnívora", "Vegetariana", "Vegana", "Pescetariana", "Baja en carbohidratos", "Otra"],
                                  index=["Omnívora", "Vegetariana", "Vegana", "Pescetariana", "Baja en carbohidratos", "Otra"].index(_ob_get("diet", "Omnívora")), key="ob_diet")
+            _ob_set("diet", diet)
             allergies = st.text_area("Alergias", value=_ob_get("allergies", ""), placeholder="Ej.: maní, mariscos…", height=76, key="ob_allergies")
+            _ob_set("allergies", allergies)
             intolerances = st.text_area("Intolerancias", value=_ob_get("intolerances", ""), placeholder="Ej.: lactosa, gluten…", height=76, key="ob_intolerances")
+            _ob_set("intolerances", intolerances)
             avoid = st.text_area("Alimentos que prefieres evitar", value=_ob_get("avoid", ""), placeholder="Separados por comas", height=76, key="ob_avoid")
+            _ob_set("avoid", avoid)
             favorites = st.text_area("Tus alimentos favoritos", value=_ob_get("favorites", ""), placeholder="Ej.: pollo, arroz, yogur…", height=76, key="ob_favorites")
+            _ob_set("favorites", favorites)
             special = st.selectbox("Situación especial", ["Ninguna", "Embarazo", "Lactancia"],
                                     index=["Ninguna", "Embarazo", "Lactancia"].index(_ob_get("special", "Ninguna")), key="ob_special")
+            _ob_set("special", special)
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
             if st.button("← Atrás", use_container_width=True, key="ob_back4"):
@@ -1806,7 +1831,7 @@ def onboarding():
             confirm = st.button("✓ Crear mi perfil", type="primary", use_container_width=True, key="ob_confirm")
         if confirm:
             errors = []
-            if not st.session_state.get("ob_name", "").strip(): errors.append("Falta tu nombre (paso 1).")
+            if not _ob_get("name", "").strip(): errors.append("Falta tu nombre (paso 1).")
             if pin and not re.fullmatch(r"\d{4}", pin): errors.append("El PIN debe tener 4 dígitos.")
             if errors:
                 for e in errors: st.error(e)
@@ -1815,18 +1840,18 @@ def onboarding():
             if st.session_state.get("ob_photo_bytes"):
                 photo_path = save_jpeg(st.session_state["ob_photo_bytes"], PROFILE_DIR, "profile", 700)
             tmp = {
-                "name": st.session_state["ob_name"].strip(),
+                "name": _ob_get("name", "").strip(),
                 "age": int(st.session_state.get("ob_age_val", 22)),
-                "sex_energy": st.session_state.get("ob_sex", "Prefiero no indicar"),
-                "height_cm": st.session_state.get("ob_height", 170.0),
-                "weight_kg": st.session_state.get("ob_weight", 70.0),
-                "activity": st.session_state.get("ob_activity", list(ACTIVITY_FACTORS)[1]),
-                "goal": st.session_state.get("ob_goal", "Mantener"),
-                "favorite_foods": st.session_state.get("ob_favorites", ""), "favorite_fruits": "", "favorite_vegetables": "",
-                "avoid_foods": st.session_state.get("ob_avoid", ""), "allergies": st.session_state.get("ob_allergies", ""),
-                "special_state": st.session_state.get("ob_special", "Ninguna"), "photo_path": photo_path,
-                "pin_hash": hash_pin(pin) if pin else "", "water_goal_ml": int(water_goal), "diet_style": st.session_state.get("ob_diet", "Omnívora"),
-                "intolerances": st.session_state.get("ob_intolerances", ""), "calorie_target": float(calorie_target),
+                "sex_energy": _ob_get("sex", "Prefiero no indicar"),
+                "height_cm": _ob_get("height", 170.0),
+                "weight_kg": _ob_get("weight", 70.0),
+                "activity": _ob_get("activity", list(ACTIVITY_FACTORS)[1]),
+                "goal": _ob_get("goal", "Mantener"),
+                "favorite_foods": _ob_get("favorites", ""), "favorite_fruits": "", "favorite_vegetables": "",
+                "avoid_foods": _ob_get("avoid", ""), "allergies": _ob_get("allergies", ""),
+                "special_state": _ob_get("special", "Ninguna"), "photo_path": photo_path,
+                "pin_hash": hash_pin(pin) if pin else "", "water_goal_ml": int(water_goal), "diet_style": _ob_get("diet", "Omnívora"),
+                "intolerances": _ob_get("intolerances", ""), "calorie_target": float(calorie_target),
                 "protein_target": float(protein_target), "carbs_target": 0.0, "fat_target": 0.0,
             }
             pid = create_profile(tmp)
