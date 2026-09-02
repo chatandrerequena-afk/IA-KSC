@@ -1733,7 +1733,6 @@ def onboarding():
                 if not name.strip():
                     st.error("Escribe tu nombre para continuar.")
                 else:
-                    st.session_state["ob_name"] = name.strip()
                     st.session_state["ob_step"] = 2
                     st.rerun()
 
@@ -1751,7 +1750,7 @@ def onboarding():
                 st.session_state["ob_step"] = 1; st.rerun()
         with c2:
             if st.button("Siguiente →", type="primary", use_container_width=True, key="ob_next2"):
-                st.session_state.update({"ob_sex": sex, "ob_height": height, "ob_weight": weight, "ob_step": 3})
+                st.session_state["ob_step"] = 3
                 st.rerun()
 
     # ---------- PASO 3: Actividad y objetivo ----------
@@ -1767,7 +1766,7 @@ def onboarding():
                 st.session_state["ob_step"] = 2; st.rerun()
         with c2:
             if st.button("Siguiente →", type="primary", use_container_width=True, key="ob_next3"):
-                st.session_state.update({"ob_activity": activity, "ob_goal": goal, "ob_step": 4})
+                st.session_state["ob_step"] = 4
                 st.rerun()
 
     # ---------- PASO 4: Alimentación ----------
@@ -1787,8 +1786,7 @@ def onboarding():
                 st.session_state["ob_step"] = 3; st.rerun()
         with c2:
             if st.button("Siguiente →", type="primary", use_container_width=True, key="ob_next4"):
-                st.session_state.update({"ob_diet": diet, "ob_allergies": allergies, "ob_intolerances": intolerances,
-                                          "ob_avoid": avoid, "ob_favorites": favorites, "ob_special": special, "ob_step": 5})
+                st.session_state["ob_step"] = 5
                 st.rerun()
 
     # ---------- PASO 5: Metas y acceso ----------
@@ -2353,19 +2351,19 @@ elif page==" Cocina inteligente":
     with tabs[1]:
         st.caption("Escribe lo que tienes y/o sube una foto de tu refrigeradora o despensa. Ambas opciones son independientes: puedes usar solo texto, solo foto, o ambos.")
         text=st.text_area("Ingredientes que tienes (opcional si subes foto)")
-        pic=st.file_uploader("Foto de refrigeradora/despensa (opcional)",type=["jpg","jpeg","png"],key="fridge")
+        pic=st.file_uploader("Foto de refrigeradora/despensa (opcional)",type=["jpg","jpeg","png"],key="fridge_upload")
         if pic is not None:
             st.image(compact_jpeg(pic.getvalue()),width=340)
             if st.button(" Detectar ingredientes de la foto",type="primary"):
                 try:
                     with st.spinner("Analizando tu foto..."):
                         d=ai_json(FRIDGE_PROMPT,compact_jpeg(pic.getvalue()))
-                    st.session_state["fridge"]=d.get("ingredients",[])
-                    if not st.session_state["fridge"]:
+                    st.session_state["fridge_detected"]=d.get("ingredients",[])
+                    if not st.session_state["fridge_detected"]:
                         st.warning("No pude identificar ingredientes claros en esta foto. Prueba con más luz o escribe manualmente abajo.")
                 except Exception as e:
                     st.error(f"No pude analizar la foto: {e}")
-        detected=st.session_state.get("fridge",[])
+        detected=st.session_state.get("fridge_detected",[])
         if detected:st.write("Detectados en la foto:",", ".join(detected))
         if st.button(" Crear recetas con esto",type="primary",use_container_width=True):
             if not text.strip() and not detected:
