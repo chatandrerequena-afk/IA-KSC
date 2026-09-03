@@ -8,6 +8,7 @@ pandas>=2.2
 requests>=2.31
 Pillow>=10.3
 groq>=0.9
+edge-tts>=6.1.0
 
 # --- Push-Up Arena (cámara + detección de pose) ---
 streamlit-webrtc>=0.47
