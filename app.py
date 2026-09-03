@@ -11,6 +11,7 @@ import secrets as pysecrets
 import sqlite3
 import threading
 import textwrap
+import asyncio
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
@@ -20,6 +21,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageOps
 from groq import Groq, AuthenticationError, RateLimitError, APIConnectionError, BadRequestError
+try:
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+except Exception:
+    EDGE_TTS_AVAILABLE = False
 
 # ============================================================
 # FitGlass / NutriVision — Liquid Glass Edition
@@ -1541,6 +1547,36 @@ def eleven_key():
 def eleven_voice_id():
     return secret("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
 
+def edge_tts_voice():
+    return secret("EDGE_TTS_VOICE", "es-PE-CamilaNeural")
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def edge_tts_synthesize(text, voice=None, rate="+3%"):
+    """Voz neural gratuita y sin clave (motor de Microsoft Edge) — funciona
+    siempre, sin cuotas ni facturación, y sirve de respaldo permanente si
+    ElevenLabs falla o no está configurado."""
+    if not EDGE_TTS_AVAILABLE:
+        return None
+    clean=re.sub(r"[#*_>`~]+", " ", text or "").strip()
+    clean=re.sub(r"\s+", " ", clean)
+    if not clean:
+        return None
+    clean=clean[:4500]
+    voice=voice or edge_tts_voice()
+
+    async def _gen():
+        communicate=edge_tts.Communicate(clean, voice=voice, rate=rate)
+        out=bytearray()
+        async for chunk in communicate.stream():
+            if chunk.get("type")=="audio":
+                out.extend(chunk["data"])
+        return bytes(out)
+
+    try:
+        return asyncio.run(_gen())
+    except Exception:
+        return None
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def eleven_tts(text, voice_id):
     key=eleven_key()
@@ -1567,26 +1603,33 @@ def eleven_tts(text, voice_id):
     return r.content
 
 def render_ai_response(text, key="fitglass_ai", autoplay=True):
-    """Generate TTS first; only then reveal the assistant text and play audio together."""
+    """Generate TTS first; only then reveal the assistant text and play audio together.
+    Intenta ElevenLabs primero (si hay clave configurada); si falla o no está
+    configurada, usa Edge-TTS como respaldo gratuito y permanente antes de
+    caer a texto solo."""
     clean=str(text or "").strip()
     if not clean:return
     audio=None
     audio_error=None
     loading=st.empty()
     loading.markdown("<div class='fg-ai-loading'><span class='fg-loader'></span><div><b>FitGlass está preparando tu respuesta</b><small>Generando voz y sincronizando la respuesta...</small></div></div>",unsafe_allow_html=True)
-    if not eleven_key():
-        audio_error="missing_key"
-    else:
+    if eleven_key():
         try:
             audio=eleven_tts(clean,eleven_voice_id())
         except Exception as e:
             audio=None
             audio_error=str(e)[:180]
+    if not audio:
+        audio=edge_tts_synthesize(clean)
+        if audio:
+            audio_error=None
+        elif audio_error is None:
+            audio_error="missing_key"
     loading.empty()
     if not audio:
         st.markdown(f"<div class='ai-message typing-fallback'>{html.escape(clean).replace(chr(10),'<br>')}</div>",unsafe_allow_html=True)
         if audio_error=="missing_key":
-            st.caption(" Voz desactivada: configura ELEVENLABS_API_KEY en Settings → Secrets para que FitGlass hable en voz alta.")
+            st.caption(" Voz desactivada: instala 'edge-tts' (pip install edge-tts) o configura ELEVENLABS_API_KEY en Settings → Secrets para que FitGlass hable en voz alta.")
         elif audio_error:
             st.caption(f" No se pudo generar la voz ({audio_error}). Se muestra la respuesta en texto.")
         return
@@ -2831,16 +2874,22 @@ elif page==" Configuración":
         except Exception as e:st.error(str(e))
     st.markdown("###  Arena Push-Up (cámara con esqueleto)")
     st.code("pip install streamlit-webrtc mediapipe av opencv-python-headless",language="powershell")
-    st.markdown("###  Voz del coach (ElevenLabs)")
+    st.markdown("###  Voz del coach (ElevenLabs + respaldo gratuito)")
     ev_ok=bool(eleven_key())
     st.markdown(textwrap.dedent(f"""
     <div class="stat-card {'accent-green' if ev_ok else 'accent-orange'}" style="max-width:420px">
       <span class="icon">{'' if ev_ok else ''}</span>
-      <div class="label">Voz con ElevenLabs</div>
+      <div class="label">ElevenLabs (voz premium, opcional)</div>
       <div class="value" style="font-size:1.1rem">{'ELEVENLABS_API_KEY encontrada' if ev_ok else 'Falta ELEVENLABS_API_KEY'}</div>
     </div>"""),unsafe_allow_html=True)
-    st.caption("El coach y la bienvenida al terminar tu perfil hablan usando ElevenLabs. Sin esta clave en Settings → Secrets, FitGlass muestra la respuesta solo en texto (no hay voz gratuita de respaldo).")
-    st.code('ELEVENLABS_API_KEY = "TU_TOKEN"\n# opcional (voz por defecto si se omite):\nELEVENLABS_VOICE_ID = "TU_VOICE_ID"',language="toml")
+    st.markdown(textwrap.dedent(f"""
+    <div class="stat-card {'accent-green' if EDGE_TTS_AVAILABLE else 'accent-orange'}" style="max-width:420px;margin-top:10px">
+      <span class="icon">{'' if EDGE_TTS_AVAILABLE else ''}</span>
+      <div class="label">Edge-TTS (respaldo gratuito, sin clave)</div>
+      <div class="value" style="font-size:1.1rem">{'Instalado y activo' if EDGE_TTS_AVAILABLE else 'Falta instalar la librería edge-tts'}</div>
+    </div>"""),unsafe_allow_html=True)
+    st.caption("El coach y la bienvenida al terminar tu perfil intentan primero ElevenLabs (mejor calidad, requiere clave y cuota). Si falla o no está configurada, FitGlass usa Edge-TTS automáticamente: voz neural gratuita, sin clave y sin límite de uso. Solo si ambas fallan se muestra la respuesta en texto.")
+    st.code('pip install edge-tts\n\n# En Secrets (opcional, ElevenLabs solo si lo quieres):\nELEVENLABS_API_KEY = "TU_TOKEN"\nELEVENLABS_VOICE_ID = "TU_VOICE_ID"\n# Voz de Edge-TTS (opcional, por defecto es-PE-CamilaNeural):\nEDGE_TTS_VOICE = "es-PE-CamilaNeural"',language="bash")
     st.markdown("###  Código de barras")
     st.caption("Usa la base pública y gratuita Open Food Facts. Los productos consultados se guardan en caché local (.ksc_data/barcode_cache.json) para funcionar más rápido la próxima vez.")
     st.markdown("###  Persistencia de datos")
