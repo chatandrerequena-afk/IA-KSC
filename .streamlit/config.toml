@@ -1,0 +1,13 @@
+# Fuerza SIEMPRE el tema oscuro de FitGlass, sin importar el sistema
+# operativo o navegador del usuario. Coloca esta carpeta ".streamlit"
+# junto a tu archivo .py para que Streamlit la lea automáticamente.
+[theme]
+base = "dark"
+primaryColor = "#6dffbc"
+backgroundColor = "#070f0c"
+secondaryBackgroundColor = "#101c17"
+textColor = "#f4fff8"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
