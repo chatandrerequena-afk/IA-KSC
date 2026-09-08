@@ -379,7 +379,21 @@ st.markdown("""
  linear-gradient(120deg,transparent 0%,rgba(255,255,255,.035) 45%,transparent 55%);background-size:220% 220%;animation:fitglassShine 12s ease-in-out infinite;z-index:0}
 @keyframes fitglassShine{0%,100%{background-position:-30% 0}50%{background-position:130% 100%}}
 .block-container{padding-top:1.25rem;max-width:1440px}
-[data-testid="stSidebar"]{display:none}
+/* La barra lateral se usa para la cuenta multiusuario (login/crear/eliminar
+   perfiles), así que debe ser visible: antes estaba oculta con display:none. */
+[data-testid="stSidebar"]{
+ background:linear-gradient(180deg,rgba(10,20,15,.92),rgba(6,14,10,.96));
+ border-right:1px solid rgba(255,255,255,.08);
+ backdrop-filter:blur(24px) saturate(160%);-webkit-backdrop-filter:blur(24px) saturate(160%);
+}
+[data-testid="stSidebar"] .stButton>button{
+ border-radius:14px!important;border:1px solid rgba(255,255,255,.12)!important;
+ background:rgba(255,255,255,.05)!important;color:#eafff5!important;font-weight:800!important;
+}
+[data-testid="stSidebar"] .stButton>button[kind="primary"]{
+ background:linear-gradient(135deg,rgba(109,255,188,.38),rgba(86,156,255,.26))!important;
+ border:1px solid rgba(155,255,218,.5)!important;
+}
 .glass-surface{background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(255,255,255,.035));border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 20px 80px rgba(0,0,0,.28);backdrop-filter:blur(30px) saturate(170%);-webkit-backdrop-filter:blur(30px) saturate(170%);border-radius:28px;position:relative;overflow:hidden}
 .glass-surface::before{content:"";position:absolute;inset:1px;border-radius:27px;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.14),transparent 28%,transparent 70%,rgba(255,255,255,.05))}
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 12px 18px;margin-bottom:16px;gap:12px}
@@ -2196,9 +2210,15 @@ def onboarding():
         st.session_state["onboarding_step"] = step - 1
         st.rerun()
     if forward:
-        if step == 0 and not ob["name"].strip():
-            st.error("Escribe tu nombre para continuar.")
-            return
+        if step == 0:
+            name_clean = ob["name"].strip()
+            if not name_clean:
+                st.error("Escribe tu nombre para continuar.")
+                return
+            existing_names = {p["name"].strip().lower() for p in list_profiles()}
+            if name_clean.lower() in existing_names:
+                st.error(f"Ya existe un perfil con el nombre «{name_clean}». Elige otro nombre o inicia sesión con ese perfil desde la barra lateral.")
+                return
         if step == total - 1:
             if ob["pin"] and not re.fullmatch(r"\d{4}", ob["pin"]):
                 st.error("El PIN debe tener exactamente 4 dígitos.")
@@ -2223,6 +2243,7 @@ def onboarding():
             add_points(pid,20,"Perfil creado")
             st.session_state["pid"]=pid
             st.session_state[f"unlocked_{pid}"]=True
+            _sync_active_profile_query_param(pid)
             st.session_state["welcome_summary"]=personalized_plan_summary(get_profile(pid))
             st.session_state.pop("onboarding", None)
             st.session_state.pop("onboarding_step", None)
@@ -2233,7 +2254,121 @@ def onboarding():
             st.rerun()
 
 
+# ============================================================
+# SESIÓN MULTIUSUARIO — barra lateral + persistencia entre recargas
+# ============================================================
+# El perfil activo vive en st.session_state["pid"], pero además se refleja
+# en la URL (?pid=N) para que un simple refresco del navegador (F5) no
+# obligue a volver a elegir perfil: al recargar, se restaura desde la URL
+# y se valida contra los perfiles reales en la base de datos. Los datos en
+# sí (usuarios.json / SQLite) nunca dependen de session_state: por eso
+# nunca se pierden ni se mezclan entre usuarios, sin importar quién tenga
+# la sesión activa en el navegador.
+
+def _sync_active_profile_query_param(pid):
+    try:
+        if pid:
+            st.query_params["pid"] = str(pid)
+        else:
+            st.query_params.pop("pid", None)
+    except Exception:
+        pass  # Streamlit antiguo sin query_params mutables: no rompe la app
+
+def _restore_pid_from_query_params(valid_ids):
+    if st.session_state.get("pid") in valid_ids:
+        return
+    try:
+        raw = st.query_params.get("pid")
+    except Exception:
+        raw = None
+    if raw:
+        try:
+            candidate = int(raw)
+            if candidate in valid_ids:
+                st.session_state["pid"] = candidate
+        except (TypeError, ValueError):
+            pass
+
+def _profile_option_labels(plist):
+    """Etiquetas únicas para el selector: si dos perfiles comparten nombre
+    (de antes de exigir nombres únicos), se distinguen con su id interno
+    para que la selección nunca sea ambigua."""
+    counts={}
+    for p in plist: counts[p["name"]]=counts.get(p["name"],0)+1
+    out=[]
+    for p in plist:
+        label=p["name"] if counts[p["name"]]==1 else f"{p['name']} (#{p['id']})"
+        out.append((label,p["id"]))
+    return out
+
+def render_account_sidebar(profiles):
+    """Barra lateral persistente de cuenta: crear, iniciar sesión y eliminar
+    perfiles. Cada acción trabaja explícitamente sobre un profile_id, así
+    que los datos de distintos usuarios NUNCA se cruzan."""
+    with st.sidebar:
+        st.markdown(
+            f'<div class="brandmark" style="margin-bottom:14px">{svg_icon("leaf",26,"#9affd0")}'
+            f'<div><div style="font-size:1.02rem;color:#fff;font-weight:900">FitGlass</div>'
+            f'<div style="font-size:.66rem;color:#98b4a6;font-weight:700;letter-spacing:.08em">CUENTA</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        active_pid = st.session_state.get("pid")
+        active = get_profile(active_pid) if active_pid else None
+
+        if active:
+            st.success(f"Sesión activa: **{active['name']}**")
+            if st.button("Cambiar de perfil / cerrar sesión", key="sb_logout", use_container_width=True):
+                st.session_state.pop("pid", None)
+                _sync_active_profile_query_param(None)
+                st.rerun()
+            st.markdown("---")
+
+        st.markdown("**Iniciar sesión**")
+        if profiles:
+            options=_profile_option_labels(profiles)
+            labels=[o[0] for o in options]; label_to_id=dict(options)
+            sel_label = st.selectbox("Selecciona tu perfil", labels, key="sb_select_profile", label_visibility="collapsed")
+            sel_profile = get_profile(label_to_id[sel_label])
+            pin_try = ""
+            if sel_profile.get("pin_hash"):
+                pin_try = st.text_input(f"PIN de {sel_profile['name']}", type="password", max_chars=4, key="sb_pin")
+            if st.button(f"Entrar como {sel_profile['name']}", key="sb_login", type="primary", use_container_width=True):
+                if sel_profile.get("pin_hash") and not verify_pin(pin_try or "", sel_profile["pin_hash"]):
+                    st.error("PIN incorrecto.")
+                else:
+                    st.session_state["pid"] = sel_profile["id"]
+                    st.session_state[f"unlocked_{sel_profile['id']}"] = True
+                    _sync_active_profile_query_param(sel_profile["id"])
+                    st.rerun()
+        else:
+            st.caption("Todavía no hay perfiles guardados en este dispositivo.")
+
+        st.markdown("---")
+        if st.button("+ Crear nuevo usuario", key="sb_new_profile", use_container_width=True):
+            st.session_state["force_new_profile"] = True
+            st.rerun()
+
+        if profiles:
+            st.markdown("---")
+            with st.expander("Eliminar un perfil"):
+                st.caption("Borra el perfil y todo su historial de este dispositivo, de forma permanente.")
+                options=_profile_option_labels(profiles)
+                labels=[o[0] for o in options]; label_to_id=dict(options)
+                del_label = st.selectbox("Perfil a eliminar", labels, key="sb_del_select")
+                del_profile = get_profile(label_to_id[del_label])
+                confirm = st.text_input("Escribe ELIMINAR para confirmar", key="sb_del_confirm")
+                if st.button("Eliminar definitivamente", key="sb_del_btn", use_container_width=True) and confirm == "ELIMINAR":
+                    was_active = (del_profile["id"] == active_pid)
+                    delete_profile(del_profile["id"])
+                    if was_active:
+                        st.session_state.pop("pid", None)
+                        _sync_active_profile_query_param(None)
+                    st.success(f"Perfil «{del_profile['name']}» eliminado.")
+                    st.rerun()
+
 profiles=list_profiles()
+_restore_pid_from_query_params({p["id"] for p in profiles})
+render_account_sidebar(profiles)
 if not profiles:
     onboarding()
     st.stop()
@@ -2258,7 +2393,8 @@ if pid not in [p["id"] for p in profiles]:
                     if pr.get("pin_hash") and not verify_pin(pin_try or "",pr["pin_hash"]):
                         st.error("PIN incorrecto.")
                     else:
-                        st.session_state["pid"]=pr["id"];st.session_state[f"unlocked_{pr['id']}"]=True;st.rerun()
+                        st.session_state["pid"]=pr["id"];st.session_state[f"unlocked_{pr['id']}"]=True
+                        _sync_active_profile_query_param(pr["id"]);st.rerun()
     st.markdown("<div style='height:10px'></div>",unsafe_allow_html=True)
     if st.button("+ Crear mi propio perfil",key="new_own_profile",type="primary",use_container_width=True):
         st.session_state["force_new_profile"]=True;st.rerun()
@@ -2541,7 +2677,7 @@ elif page==" Mi perfil":
                 st.warning("Esto borra el perfil y todo su historial de forma permanente.")
                 confirm=st.text_input("Escribe ELIMINAR para confirmar",key="del_confirm")
                 if st.button("Eliminar perfil definitivamente") and confirm=="ELIMINAR":
-                    delete_profile(profile["id"]);st.session_state.pop("pid",None);st.rerun()
+                    delete_profile(profile["id"]);st.session_state.pop("pid",None);_sync_active_profile_query_param(None);st.rerun()
 
 # ============================================================
 # COMUNIDAD (ver otros perfiles, retar, mensajes locales)
@@ -3138,5 +3274,5 @@ elif page==" Configuración":
     st.info("Todos los perfiles, comidas, puntos y retos se guardan en .fitglass_data/ dentro del servidor donde corre la app. No se borran al cerrar el navegador. Si despliegas en un hosting con almacenamiento temporal, monta un volumen persistente en esa carpeta.")
     st.markdown("###  Tu sesión")
     if st.button("Cambiar de perfil / salir",key="switch_profile_btn"):
-        st.session_state.pop("pid",None);st.rerun()
+        st.session_state.pop("pid",None);_sync_active_profile_query_param(None);st.rerun()
     st.info("FitGlass es un asistente nutricional educativo. Encargados actuales: Requena Núñez Juan Carlos, André y Atarama Sebastián. Créditos del proyecto: César y Alexander.")
