@@ -36,12 +36,12 @@ AI_MODEL = "qwen/qwen3.6-27b"
 USDA_BASE = "https://api.nal.usda.gov/fdc/v1"
 OFF_BASE = "https://world.openfoodfacts.org/api/v2/product"
 
-DATA_DIR = Path(".fitglass_data")
+DATA_DIR = Path(".ksc_data")
 PROFILE_DIR = DATA_DIR / "profile_photos"
 MEAL_DIR = DATA_DIR / "meal_photos"
 PUSHUP_DIR = DATA_DIR / "pushup_videos"
 MODEL_DIR = DATA_DIR / "models"
-DB_PATH = DATA_DIR / "fitglass.db"
+DB_PATH = DATA_DIR / "ksc.db"
 BARCODE_CACHE_PATH = DATA_DIR / "barcode_cache.json"
 COMMUNITY_PATH = DATA_DIR / "community_profiles.json"
 
@@ -64,12 +64,12 @@ st.set_page_config(
 # ============================================================
 # NOTA DE PERSISTENCIA
 # ============================================================
-# Todo (perfiles, comidas, puntos, retos) se guarda en .fitglass_data/fitglass.db
+# Todo (perfiles, comidas, puntos, retos) se guarda en .ksc_data/ksc.db
 # (SQLite) en el disco donde corre la app. Mientras esa carpeta no se
 # borre, los perfiles NUNCA se pierden, aunque cierres la pestaña o
 # reinicies el navegador. Si despliegas esto en un hosting con disco
 # "efímero" (se borra en cada reinicio del servidor), debes montar un
-# volumen persistente apuntando a .fitglass_data — si no, el hosting es el
+# volumen persistente apuntando a .ksc_data — si no, el hosting es el
 # que borra los datos, no la app.
 
 # ============================================================
@@ -128,12 +128,7 @@ html, body, [class*="css"], .stApp{
  animation:fadeIn .5s var(--ease);
 }
 .block-container{max-width:1320px;padding-top:1.1rem;padding-bottom:4rem}
-/* OJO: esta capa NO debe animar "transform" — un transform activo (incluso en
-   reposo, por animation-fill-mode) convierte a este div en "containing block"
-   de sus hijos position:fixed, y eso es lo que descentraba/rompía la barra
-   inferior fija. Por eso aquí solo animamos opacidad. */
-.block-container > div{ animation:fgFadeSafe .45s var(--ease) both; }
-@keyframes fgFadeSafe{ from{opacity:0} to{opacity:1} }
+.block-container > div{ animation:fadeInUp .45s var(--ease) both; }
 
 [data-testid="stSidebar"]{
  background:linear-gradient(180deg,#07140e,#091a12);
@@ -376,8 +371,8 @@ st.markdown("""
  radial-gradient(780px 520px at 52% 102%, rgba(200,130,255,.14), transparent 62%),
  linear-gradient(180deg,#07110e 0%,#050b09 100%);}
 .stApp::before{content:"";position:fixed;inset:0;pointer-events:none;background:
- linear-gradient(120deg,transparent 0%,rgba(255,255,255,.035) 45%,transparent 55%);background-size:220% 220%;animation:fitglassShine 12s ease-in-out infinite;z-index:0}
-@keyframes fitglassShine{0%,100%{background-position:-30% 0}50%{background-position:130% 100%}}
+ linear-gradient(120deg,transparent 0%,rgba(255,255,255,.035) 45%,transparent 55%);background-size:220% 220%;animation:kscShine 12s ease-in-out infinite;z-index:0}
+@keyframes kscShine{0%,100%{background-position:-30% 0}50%{background-position:130% 100%}}
 .block-container{padding-top:1.25rem;max-width:1440px}
 [data-testid="stSidebar"]{display:none}
 .glass-surface{background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(255,255,255,.035));border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 20px 80px rgba(0,0,0,.28);backdrop-filter:blur(30px) saturate(170%);-webkit-backdrop-filter:blur(30px) saturate(170%);border-radius:28px;position:relative;overflow:hidden}
@@ -425,95 +420,100 @@ st.markdown("""
 .control-hint{font-size:.74rem;color:#89a99a;margin-top:6px}
 
 /* ============================================================
-   Barra de navegación inferior fija (Inicio · Hoy · Coach)
-   Liquid Glass — múltiples capas + blur + brillo, estilo iOS
+   Barra de navegación inferior fija con Liquid Glass (Inicio · Hoy · Coach)
    ============================================================ */
-@keyframes fgNavIn{ from{opacity:0;transform:translate(-50%,14px)} to{opacity:1;transform:translate(-50%,0)} }
-@keyframes fgSheenDrift{ 0%,100%{transform:translateX(-18%)} 50%{transform:translateX(18%)} }
-@keyframes fgGlowPulse{ 0%,100%{opacity:.55;transform:translate(-50%,-50%) scale(1)} 50%{opacity:.9;transform:translate(-50%,-50%) scale(1.12)} }
-
-html body .st-key-fg_bottomnav{
- position:fixed!important;left:50%!important;right:auto!important;top:auto!important;
- bottom:20px!important;transform:translate(-50%,0)!important;
- z-index:999999!important;
- width:auto!important;min-width:min(94vw,430px);max-width:min(96vw,460px);
- border-radius:28px;padding:9px;isolation:isolate;overflow:visible;
- /* Capa base: vidrio oscuro translúcido */
+.st-key-fg_bottomnav{
+ position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:999;
+ width:auto!important;min-width:min(94vw,440px);
+ /* Capas de fondo para efecto vidrio líquido */
  background:
-   linear-gradient(135deg,rgba(255,255,255,.14),rgba(255,255,255,.02) 40%,rgba(255,255,255,.05) 100%),
-   linear-gradient(180deg,rgba(22,36,29,.72),rgba(10,20,15,.80));
- border:1px solid rgba(255,255,255,.22);
- backdrop-filter:blur(34px) saturate(190%);-webkit-backdrop-filter:blur(34px) saturate(190%);
+  radial-gradient(circle at 30% 30%, rgba(110,255,188,.18), transparent 50%),
+  radial-gradient(circle at 70% 70%, rgba(120,165,255,.14), transparent 50%),
+  linear-gradient(135deg,rgba(20,32,26,.92),rgba(14,24,19,.88));
+ border:1.5px solid rgba(255,255,255,.22);
+ border-radius:32px;
+ padding:10px 8px;
+ backdrop-filter:blur(42px) saturate(200%);
+ -webkit-backdrop-filter:blur(42px) saturate(200%);
  box-shadow:
-   0 24px 60px rgba(0,0,0,.50),
-   0 2px 0 rgba(255,255,255,.06) inset,
-   inset 0 1px 0 rgba(255,255,255,.30),
-   inset 0 -14px 22px -14px rgba(0,0,0,.55),
-   inset 0 0 0 1px rgba(255,255,255,.04);
- animation:fgNavIn .5s var(--ease) both;
+  0 0 60px rgba(110,255,188,.15),
+  0 24px 68px rgba(0,0,0,.52),
+  inset 0 1px 0 rgba(255,255,255,.28),
+  inset -1px -1px 0 rgba(0,0,0,.3);
+ animation:fadeInUp .5s var(--ease) both;
 }
-/* Capa 2: brillo superior "sheen" de vidrio, como el reflejo curvo de una lente */
 .st-key-fg_bottomnav::before{
- content:"";position:absolute;left:6%;right:6%;top:3px;height:46%;border-radius:24px 24px 60% 60%/24px 24px 100% 100%;
- background:linear-gradient(180deg,rgba(255,255,255,.40),rgba(255,255,255,0) 85%);
- opacity:.65;pointer-events:none;mix-blend-mode:overlay;z-index:1;
+ content:"";
+ position:absolute;
+ inset:0;
+ border-radius:32px;
+ background:linear-gradient(135deg,rgba(255,255,255,.12),transparent 40%,transparent 70%,rgba(255,255,255,.04));
+ pointer-events:none;
+ opacity:.8;
 }
-/* Capa 3: destello que se desliza suavemente, dando sensación de líquido en movimiento */
-.st-key-fg_bottomnav::after{
- content:"";position:absolute;inset:0;border-radius:28px;pointer-events:none;z-index:1;
- background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.10) 48%,rgba(255,255,255,.18) 52%,transparent 65%);
- background-size:220% 100%;
- animation:fgSheenDrift 7s ease-in-out infinite;
-}
-.st-key-fg_bottomnav [data-testid="stHorizontalBlock"]{gap:6px!important;position:relative;z-index:2}
-.st-key-fg_bottomnav [data-testid="column"]{position:relative}
-.st-key-fg_bottomnav .stButton{position:relative}
+.st-key-fg_bottomnav [data-testid="stHorizontalBlock"]{gap:8px!important}
 .st-key-fg_bottomnav .stButton>button{
- position:relative;overflow:hidden;isolation:isolate;
- border-radius:20px!important;min-height:54px;font-weight:850!important;
- transition:transform .22s var(--ease),box-shadow .22s var(--ease),background .22s var(--ease),color .22s var(--ease)!important;
+ border-radius:22px!important;
+ min-height:56px;
+ font-weight:880!important;
+ transition:all .26s cubic-bezier(.34,.1,.68,.55)!important;
+ position:relative;
+ z-index:2;
 }
-/* Brillo interior sutil en todos los botones (borde de vidrio) */
-.st-key-fg_bottomnav .stButton>button::before{
- content:"";position:absolute;inset:0;border-radius:20px;pointer-events:none;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -6px 10px -6px rgba(0,0,0,.35);
-}
-/* Destello que recorre el botón al pasar el cursor, típico del liquid glass */
-.st-key-fg_bottomnav .stButton>button::after{
- content:"";position:absolute;inset:0;border-radius:20px;pointer-events:none;
- background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%);
- transform:translateX(-120%);transition:transform .65s var(--ease);
-}
-.st-key-fg_bottomnav .stButton>button:hover::after{transform:translateX(120%)}
 .st-key-fg_bottomnav .stButton>button[kind="secondary"]{
- border:1px solid rgba(255,255,255,.10)!important;
- background:linear-gradient(135deg,rgba(255,255,255,.06),rgba(255,255,255,.01))!important;
- color:#b7d0c3!important;
+ border:1.2px solid rgba(255,255,255,.08)!important;
+ background:rgba(255,255,255,.04)!important;
+ color:#b0c8bb!important;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.08)!important;
 }
 .st-key-fg_bottomnav .stButton>button[kind="secondary"]:hover{
- background:linear-gradient(135deg,rgba(255,255,255,.14),rgba(255,255,255,.03))!important;
- color:#fff!important;transform:translateY(-2px)!important;
+ background:rgba(255,255,255,.12)!important;
+ color:#e0f4eb!important;
+ border-color:rgba(255,255,255,.18)!important;
+ transform:translateY(-3px) scale(1.02)!important;
+ box-shadow:0 12px 32px rgba(110,255,188,.18),inset 0 1px 0 rgba(255,255,255,.16)!important;
 }
-.st-key-fg_bottomnav .stButton>button[kind="secondary"]:active{transform:translateY(0) scale(.97)!important}
 .st-key-fg_bottomnav .stButton>button[kind="primary"]{
- background:linear-gradient(135deg,rgba(120,255,196,.42),rgba(92,168,255,.30))!important;
- border:1px solid rgba(175,255,224,.55)!important;color:#fff!important;
- box-shadow:0 12px 30px rgba(90,255,180,.22),inset 0 1px 0 rgba(255,255,255,.45)!important;
- transform:translateY(-2px);
+ background:linear-gradient(135deg,rgba(110,255,188,.48),rgba(86,156,255,.32))!important;
+ border:1.5px solid rgba(155,255,218,.58)!important;
+ color:#fff!important;
+ font-weight:900!important;
+ box-shadow:
+  0 14px 38px rgba(90,255,180,.24),
+  inset 0 1px 0 rgba(255,255,255,.32),
+  inset -1px -1px 0 rgba(0,0,0,.15),
+  0 0 24px rgba(110,255,188,.20)!important;
+ position:relative;
 }
-.st-key-fg_bottomnav .stButton>button[kind="primary"]:active{transform:translateY(-1px) scale(.97)!important}
-/* Luz ambiental de "vidrio líquido" bajo el botón activo, como si emitiera un resplandor a través del cristal */
-.st-key-fg_bottomnav [data-testid="column"]:has(.stButton>button[kind="primary"])::before{
- content:"";position:absolute;left:50%;top:50%;width:70px;height:70px;z-index:-1;
- background:radial-gradient(circle,rgba(120,255,196,.55),rgba(92,168,255,.18) 55%,transparent 75%);
- filter:blur(16px);animation:fgGlowPulse 2.6s ease-in-out infinite;pointer-events:none;
+.st-key-fg_bottomnav .stButton>button[kind="primary"]::before{
+ content:"";
+ position:absolute;
+ inset:0;
+ border-radius:22px;
+ background:linear-gradient(135deg,rgba(255,255,255,.2),transparent 50%);
+ pointer-events:none;
 }
-.st-key-fg_bottomnav .stButton>button p{font-size:.78rem!important;position:relative;z-index:1}
-/* Reserva de espacio real al final de cada página para que nada quede tapado por el nav fijo */
-.block-container{padding-bottom:150px!important}
+.st-key-fg_bottomnav .stButton>button[kind="primary"]:hover{
+ transform:translateY(-4px) scale(1.05)!important;
+ box-shadow:
+  0 18px 48px rgba(90,255,180,.32),
+  inset 0 2px 0 rgba(255,255,255,.4),
+  inset -1px -1px 0 rgba(0,0,0,.2),
+  0 0 32px rgba(110,255,188,.28)!important;
+}
+.st-key-fg_bottomnav .stButton>button p{font-size:.82rem!important;letter-spacing:.02em}
+/* Reserva de espacio real al final para que nada quede tapado */
+.block-container{padding-bottom:180px!important}
 @media(max-width:820px){
- html body .st-key-fg_bottomnav{bottom:14px!important;min-width:92vw;padding:7px}
- .block-container{padding-bottom:170px!important}
+ .st-key-fg_bottomnav{
+  bottom:16px;
+  min-width:90vw;
+  padding:8px 6px;
+  border-radius:28px;
+  box-shadow:0 0 50px rgba(110,255,188,.12),0 20px 60px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.2);
+ }
+ .st-key-fg_bottomnav .stButton>button{min-height:52px;border-radius:20px!important}
+ .block-container{padding-bottom:190px!important}
  .fg-bg-orbs span{filter:blur(46px);opacity:.42}
 }
 </style>
@@ -1172,7 +1172,7 @@ def ai_edit_profile(p,text):
     data=ai_json(PROFILE_EDIT_PROMPT+"\nPERFIL ACTUAL:\n"+profile_context(p)+"\nINSTRUCCIÓN:\n"+text,max_tokens=1000)
     return apply_profile_updates(p["id"],data.get("updates",{}))
 
-def fitglass_chat(p,text):
+def ksc_chat(p,text):
     if not ai_key():raise RuntimeError("Falta GROQ_API_KEY.")
     msgs=[{"role":"system","content":system_prompt(p)}]+get_chat(p["id"],16)+[{"role":"user","content":text}]
     try:
@@ -1825,7 +1825,7 @@ def hero(p=None):
         )
     st.markdown(
         '<div class="hero">'
-        '<div class="hero-title">Fit<span class="green">Glass</span></div>'
+        '<div class="hero-title">IA <span class="green">FitGlass</span></div>'
         '<div class="hero-sub">Tu diario nutricional completo: comidas, código de barras, chat por voz, retos físicos, comunidad y progreso — todo en un solo lugar.</div>'
         f'{extra}'
         '</div>',
@@ -2287,7 +2287,7 @@ if page==" Inicio":
         if st.button(f"Recomiéndame {moment}",type="primary",use_container_width=True):
             prompt=f"Es {moment}. Hoy llevo {total['kcal']:.0f} kcal, {total['protein']:.1f} g proteína, {total['fiber']:.1f} g fibra y {water} ml de agua. Dame 3 opciones para mi perfil y mis gustos."
             try:
-                ans=fitglass_chat(profile,prompt)
+                ans=ksc_chat(profile,prompt)
                 st.markdown(ans)
                 voice_reader_component(ans, autoplay=True, key="home_tts")
             except RuntimeError as e:st.error(str(e))
@@ -2449,7 +2449,7 @@ elif page==" Diario de comidas":
                     if profile.get("allergies"):st.warning("Alergias/restricciones del perfil: "+profile["allergies"])
                     if st.button(" Analizar para mi perfil"):
                         try:
-                            ans=fitglass_chat(profile,f"Analiza este plato para mí: {[(x['name'],x['grams']) for x in calc]}. Totales {tot}.")
+                            ans=ksc_chat(profile,f"Analiza este plato para mí: {[(x['name'],x['grams']) for x in calc]}. Totales {tot}.")
                             render_ai_response(ans,autoplay=True,key="meal_tts")
                         except Exception as e:st.error(str(e))
                     c1,c2=st.columns(2);mt=c1.selectbox("Momento",["Desayuno","Media mañana","Almuerzo","Merienda","Cena","Otro"]);title=c2.text_input("Nombre",res.get("summary","Mi comida")[:80])
@@ -2518,7 +2518,7 @@ elif page==" Escáner de código de barras":
             if profile.get("allergies"):st.warning("Tu perfil declara alergias a: "+profile["allergies"]+" — verifica siempre la etiqueta original.")
             if st.button(" ¿Me conviene este producto?",type="primary"):
                 try:
-                    ans=fitglass_chat(profile,f"Analiza este producto escaneado para mi perfil: {json.dumps(info,ensure_ascii=False)}")
+                    ans=ksc_chat(profile,f"Analiza este producto escaneado para mi perfil: {json.dumps(info,ensure_ascii=False)}")
                     render_ai_response(ans,autoplay=True,key="bc_tts")
                 except Exception as e:st.error(str(e))
 
@@ -2573,7 +2573,7 @@ elif page==" Comparar platos":
             ]),hide_index=True,use_container_width=True)
             if st.button(" ¿Cuál encaja mejor conmigo?"):
                 try:
-                    ans=fitglass_chat(profile,f"Compara estos platos para mi perfil. A={totals[0]}, B={totals[1]}. Explica contexto y alternativa.")
+                    ans=ksc_chat(profile,f"Compara estos platos para mi perfil. A={totals[0]}, B={totals[1]}. Explica contexto y alternativa.")
                     render_ai_response(ans,autoplay=True,key="cmp_tts")
                 except Exception as e:st.error(str(e))
 
@@ -2604,7 +2604,7 @@ elif page==" Chat por voz con FitGlass":
         prompt=dictated_prompt
     if prompt:
         with st.chat_message("user"):st.markdown(prompt)
-        try:ans=fitglass_chat(profile,prompt)
+        try:ans=ksc_chat(profile,prompt)
         except Exception as e:ans="No pude responder ahora mismo: "+str(e)
         add_chat(profile["id"],"user",prompt);add_chat(profile["id"],"assistant",ans)
         with st.chat_message("assistant"):
@@ -2617,14 +2617,14 @@ elif page==" Chat por voz con FitGlass":
 # ============================================================
 
 elif page==" Cocina inteligente":
-    need_profile(profile);section("CHEF FITGLASS","Cocina inteligente","Recetas, refrigeradora, presupuesto, Perú, jugos, postres, favoritos y sustituciones.")
+    need_profile(profile);section("CHEF FitGlass","Cocina inteligente","Recetas, refrigeradora, presupuesto, Perú, jugos, postres, favoritos y sustituciones.")
     tabs=st.tabs(["Recetas"," Tengo esto"," Presupuesto"," Perú","Favoritos"])
     with tabs[0]:
         cat=st.selectbox("Tipo",["Desayuno","Almuerzo","Cena","Snack","Jugo/Batido","Postre nutritivo"])
         ing=st.text_input("Ingrediente opcional");mins=st.selectbox("Tiempo",["10 min","20 min","30 min","45+ min"])
         if st.button("Crear receta",type="primary"):
             try:
-                st.session_state["recipe"]=fitglass_chat(profile,f"Crea un {cat}, usa {ing or 'lo que convenga'}, tiempo {mins}. Ingredientes con cantidades, pasos y calorías aproximadas.")
+                st.session_state["recipe"]=ksc_chat(profile,f"Crea un {cat}, usa {ing or 'lo que convenga'}, tiempo {mins}. Ingredientes con cantidades, pasos y calorías aproximadas.")
             except Exception as e:
                 st.error(f"No pude crear la receta: {e}")
         if st.session_state.get("recipe"):
@@ -2634,7 +2634,7 @@ elif page==" Cocina inteligente":
             replacement=c2.text_input("Ingrediente a sustituir",key="sub")
             if c2.button(" Sustituir") and replacement:
                 try:
-                    st.markdown(fitglass_chat(profile,f"En esta receta sustituye {replacement}: {st.session_state['recipe']}"))
+                    st.markdown(ksc_chat(profile,f"En esta receta sustituye {replacement}: {st.session_state['recipe']}"))
                 except Exception as e:
                     st.error(str(e))
     with tabs[1]:
@@ -2659,21 +2659,21 @@ elif page==" Cocina inteligente":
                 st.warning("Escribe algún ingrediente o sube una foto primero.")
             else:
                 try:
-                    st.markdown(fitglass_chat(profile,f"Tengo {text or 'nada escrito'}; además detectaste {detected or 'nada en foto'}. Dame 3 recetas usando lo que tengo."))
+                    st.markdown(ksc_chat(profile,f"Tengo {text or 'nada escrito'}; además detectaste {detected or 'nada en foto'}. Dame 3 recetas usando lo que tengo."))
                 except Exception as e:
                     st.error(f"No pude generar recetas: {e}")
     with tabs[2]:
         budget=st.number_input("Presupuesto S/",5.,500.,25.,1.);days=st.number_input("Días",1,7,1,1)
         if st.button("Crear menú económico"):
             try:
-                st.markdown(fitglass_chat(profile,f"Tengo S/{budget:.2f} para {days} días. Crea menú económico en Perú; precios solo aproximados."))
+                st.markdown(ksc_chat(profile,f"Tengo S/{budget:.2f} para {days} días. Crea menú económico en Perú; precios solo aproximados."))
             except Exception as e:
                 st.error(str(e))
     with tabs[3]:
         dish=st.selectbox("Plato peruano",["Ceviche","Arroz con pollo","Lomo saltado","Ají de gallina","Causa","Seco de chavelo","Menestra con arroz","Pollo a la brasa","Papa a la huancaína"])
         if st.button("Analizar / adaptar"):
             try:
-                st.markdown(fitglass_chat(profile,f"Analiza {dish} para mi perfil y dame una versión alternativa si conviene, conservando identidad del plato."))
+                st.markdown(ksc_chat(profile,f"Analiza {dish} para mi perfil y dame una versión alternativa si conviene, conservando identidad del plato."))
             except Exception as e:
                 st.error(str(e))
     with tabs[4]:
@@ -2704,7 +2704,7 @@ elif page==" Plan semanal":
         c1,c2=st.columns(2)
         if c1.button("Guardar plan"):save_plan(profile["id"],week,plan);st.success("Guardado")
         html="<html><body><h1>Plan semanal FitGlass</h1>"+pd.DataFrame(days).to_html(index=False)+"<h2>Compras</h2><ul>"+"".join(f"<li>{x}</li>" for x in plan.get("shopping_list",[]))+"</ul></body></html>"
-        c2.download_button("Exportar HTML",html.encode(),file_name="plan_FitGlass.html",mime="text/html",use_container_width=True)
+        c2.download_button("Exportar HTML",html.encode(),file_name="plan_IA_FitGlass.html",mime="text/html",use_container_width=True)
 
 # ============================================================
 # AGUA & HÁBITOS
@@ -2731,7 +2731,7 @@ elif page==" Agua & hábitos":
             if not g["completed"] and b.button("Completar",key=f"goal_{g['id']}"):complete_goal(g["id"],profile["id"]);st.rerun()
 
 # ============================================================
-# RECOMPENSAS FITGLASS (juego)
+# RECOMPENSAS FitGlass (juego)
 # ============================================================
 
 elif page==" Recompensas FitGlass":
@@ -2963,9 +2963,9 @@ elif page==" Configuración":
     st.caption("El coach y la bienvenida al terminar tu perfil intentan primero ElevenLabs (mejor calidad, requiere clave y cuota). Si falla o no está configurada, FitGlass usa Edge-TTS automáticamente: voz neural gratuita, sin clave y sin límite de uso. Solo si ambas fallan se muestra la respuesta en texto.")
     st.code('pip install edge-tts\n\n# En Secrets (opcional, ElevenLabs solo si lo quieres):\nELEVENLABS_API_KEY = "TU_TOKEN"\nELEVENLABS_VOICE_ID = "TU_VOICE_ID"\n# Voz de Edge-TTS (opcional, por defecto es-PE-CamilaNeural):\nEDGE_TTS_VOICE = "es-PE-CamilaNeural"',language="bash")
     st.markdown("###  Código de barras")
-    st.caption("Usa la base pública y gratuita Open Food Facts. Los productos consultados se guardan en caché local (.fitglass_data/barcode_cache.json) para funcionar más rápido la próxima vez.")
+    st.caption("Usa la base pública y gratuita Open Food Facts. Los productos consultados se guardan en caché local (.ksc_data/barcode_cache.json) para funcionar más rápido la próxima vez.")
     st.markdown("###  Persistencia de datos")
-    st.info("Todos los perfiles, comidas, puntos y retos se guardan en .fitglass_data/ dentro del servidor donde corre la app. No se borran al cerrar el navegador. Si despliegas en un hosting con almacenamiento temporal, monta un volumen persistente en esa carpeta.")
+    st.info("Todos los perfiles, comidas, puntos y retos se guardan en .ksc_data/ dentro del servidor donde corre la app. No se borran al cerrar el navegador. Si despliegas en un hosting con almacenamiento temporal, monta un volumen persistente en esa carpeta.")
     st.markdown("###  Tu sesión")
     if st.button("Cambiar de perfil / salir",key="switch_profile_btn"):
         st.session_state.pop("pid",None);st.rerun()
