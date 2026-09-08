@@ -529,9 +529,27 @@ html body .st-key-fg_bottomnav{
 /* Reserva de espacio real al final de cada página para que nada quede tapado por el nav fijo */
 .block-container{padding-bottom:150px!important}
 @media(max-width:820px){
- html body .st-key-fg_bottomnav{bottom:14px!important;min-width:92vw;padding:7px}
- .block-container{padding-bottom:170px!important}
+ html body .st-key-fg_bottomnav{
+   bottom:12px!important;min-width:min(94vw,380px)!important;max-width:min(96vw,400px)!important;
+   padding:5px!important;border-radius:24px;
+ }
+ .st-key-fg_bottomnav [data-testid="stHorizontalBlock"]{gap:4px!important}
+ .st-key-fg_bottomnav .stButton>button{
+   min-height:44px!important;border-radius:16px!important;padding:2px 4px!important;
+ }
+ .st-key-fg_bottomnav .stButton>button p{font-size:.66rem!important;line-height:1.1}
+ .st-key-fg_bottomnav .stButton>button [data-testid="stIconMaterial"]{font-size:1.15rem!important}
+ .st-key-fg_bottomnav [data-testid="column"]:has(.stButton>button[kind="primary"])::before{width:50px;height:50px;filter:blur(12px)}
+ .block-container{padding-bottom:140px!important}
  .fg-bg-orbs span{filter:blur(46px);opacity:.42}
+}
+@media(max-width:400px){
+ html body .st-key-fg_bottomnav{min-width:92vw!important;padding:4px!important;bottom:10px!important}
+ .st-key-fg_bottomnav .stButton>button{min-height:40px!important;padding:1px 2px!important}
+ .st-key-fg_bottomnav .stButton>button p{font-size:.6rem!important}
+ .st-key-fg_bottomnav .stButton>button [data-testid="stIconMaterial"]{font-size:1.05rem!important}
+ .st-key-fg_bottomnav [data-testid="column"]:has(.stButton>button[kind="primary"])::before{width:42px;height:42px;filter:blur(10px)}
+ .block-container{padding-bottom:126px!important}
 }
 </style>
 """, unsafe_allow_html=True)
