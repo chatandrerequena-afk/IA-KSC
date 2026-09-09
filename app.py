@@ -750,10 +750,60 @@ def init_db():
     ensure_col(con, "profiles", "region TEXT DEFAULT 'Perú'")
     ensure_col(con, "profiles", "notes TEXT DEFAULT ''")
     ensure_col(con, "profiles", "reminders_enabled INTEGER DEFAULT 1")
+    # --- Mejora #1: % de grasa corporal opcional -> permite usar Katch-McArdle
+    # (basado en masa magra) en vez de solo Mifflin-St Jeor, para un cálculo
+    # de calorías más preciso cuando el usuario lo conoce (báscula, caliper, etc.)
+    ensure_col(con, "profiles", "body_fat_pct REAL DEFAULT 0")
+    # --- Mejora #2: índices en columnas usadas en casi todas las consultas
+    # (profile_id + fecha) para que el historial no se ponga lento al crecer.
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_meal_diary_pid_date ON meal_diary(profile_id, meal_date)",
+        "CREATE INDEX IF NOT EXISTS idx_weight_logs_pid_date ON weight_logs(profile_id, log_date)",
+        "CREATE INDEX IF NOT EXISTS idx_measurements_pid_date ON measurements(profile_id, log_date)",
+        "CREATE INDEX IF NOT EXISTS idx_hydration_pid_date ON hydration(profile_id, log_date)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_pid ON chat_messages(profile_id)",
+        "CREATE INDEX IF NOT EXISTS idx_point_events_pid_date ON point_events(profile_id, event_date)",
+        "CREATE INDEX IF NOT EXISTS idx_healthy_goals_pid_date ON healthy_goals(profile_id, goal_date)",
+    ]:
+        try: con.execute(idx_sql)
+        except Exception: pass
     con.commit()
     con.close()
 
+def backup_database(keep=10):
+    """Mejora #3 (gratis, sin dependencias nuevas): copia de respaldo automática
+    de la base de datos con marca de tiempo, conservando las últimas `keep`.
+    Nunca borra ni toca el archivo principal; si algo falla, se ignora en
+    silencio para no romper el arranque de la app."""
+    try:
+        if not DB_PATH.exists():
+            return
+        backup_dir = DATA_DIR / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = real_datetime().strftime("%Y%m%d_%H%M%S")
+        dest = backup_dir / f"fitglass_{stamp}.db"
+        # Solo respalda si pasó al menos 1 hora desde el último backup,
+        # para no llenar el disco de copias idénticas en cada recarga.
+        existing = sorted(backup_dir.glob("fitglass_*.db"))
+        if existing:
+            last = existing[-1]
+            age_s = time.time() - last.stat().st_mtime
+            if age_s < 3600:
+                return
+        con = sqlite3.connect(DB_PATH)
+        dest_con = sqlite3.connect(dest)
+        with dest_con:
+            con.backup(dest_con)
+        con.close(); dest_con.close()
+        existing = sorted(backup_dir.glob("fitglass_*.db"))
+        for old in existing[:-keep]:
+            try: old.unlink()
+            except Exception: pass
+    except Exception:
+        pass
+
 init_db()
+backup_database()
 
 # ============================================================
 # SEGURIDAD
@@ -781,7 +831,7 @@ def verify_pin(pin, stored):
 # PERFILES
 # ============================================================
 
-ACTIVITY_FACTORS = {"Sedentario":1.20,"Ligero":1.375,"Moderado":1.55,"Alto":1.725}
+ACTIVITY_FACTORS = {"Sedentario":1.20,"Ligero":1.375,"Moderado":1.55,"Alto":1.725,"Muy alto":1.9}
 
 def list_profiles():
     con=db()
@@ -815,8 +865,8 @@ def create_profile(d):
         d.get("carbs_target",0),d.get("fat_target",0)
     ))
     pid=cur.lastrowid
-    con.execute("UPDATE profiles SET region=?, notes=?, reminders_enabled=? WHERE id=?",
-                (d.get("region","Perú"),d.get("notes",""),int(d.get("reminders_enabled",1)),pid))
+    con.execute("UPDATE profiles SET region=?, notes=?, reminders_enabled=?, body_fat_pct=? WHERE id=?",
+                (d.get("region","Perú"),d.get("notes",""),int(d.get("reminders_enabled",1)),num(d.get("body_fat_pct",0)),pid))
     con.execute("INSERT INTO weight_logs(profile_id,log_date,weight_kg,note) VALUES(?,?,?,?)",
                 (pid,str(real_today()),d["weight_kg"],"Peso inicial"))
     con.commit();con.close()
@@ -830,14 +880,15 @@ def update_profile(pid,d):
        name=?,age=?,sex_energy=?,height_cm=?,weight_kg=?,activity=?,goal=?,
        favorite_foods=?,favorite_fruits=?,favorite_vegetables=?,avoid_foods=?,
        allergies=?,special_state=?,photo_path=?,water_goal_ml=?,diet_style=?,intolerances=?,
-       calorie_target=?,protein_target=?,carbs_target=?,fat_target=?,region=?,notes=?,reminders_enabled=?
+       calorie_target=?,protein_target=?,carbs_target=?,fat_target=?,region=?,notes=?,reminders_enabled=?,body_fat_pct=?
       WHERE id=?
     """,(
         d["name"],d["age"],d["sex_energy"],d["height_cm"],d["weight_kg"],d["activity"],d["goal"],
         d.get("favorite_foods",""),d.get("favorite_fruits",""),d.get("favorite_vegetables",""),d.get("avoid_foods",""),
         d.get("allergies",""),d.get("special_state","Ninguno"),d.get("photo_path",""),d.get("water_goal_ml",2000),
         d.get("diet_style","Omnívora"),d.get("intolerances",""),d.get("calorie_target",0),d.get("protein_target",0),
-        d.get("carbs_target",0),d.get("fat_target",0),d.get("region","Perú"),d.get("notes",""),int(d.get("reminders_enabled",1)),pid
+        d.get("carbs_target",0),d.get("fat_target",0),d.get("region","Perú"),d.get("notes",""),int(d.get("reminders_enabled",1)),
+        num(d.get("body_fat_pct",0)),pid
     ))
     con.commit();con.close()
     sync_community()
@@ -1045,6 +1096,121 @@ def complete_goal(gid,pid):
 # ENERGÍA / PERFIL
 # ============================================================
 
+def _bmr_estimate(sex, age, h, w, body_fat_pct=None):
+    """Calcula la tasa metabólica basal con el mejor método disponible:
+    - Katch-McArdle (usa masa magra) si se conoce el % de grasa corporal:
+      es más preciso porque el tejido graso casi no consume energía, así
+      que dos personas con el mismo peso pero distinta composición corporal
+      tienen gastos distintos y Mifflin-St Jeor no lo distingue.
+    - Mifflin-St Jeor en caso contrario (la fórmula con menor error medio
+      frente a calorimetría indirecta entre las ecuaciones sin grasa corporal).
+    Devuelve (bmr, metodo)."""
+    if body_fat_pct and 5 <= body_fat_pct <= 60:
+        lean_kg = w * (1 - body_fat_pct/100.0)
+        return 370 + 21.6*lean_kg, "katch_mcardle"
+    bmr = 10*w + 6.25*h - 5*age + (5 if sex=="Masculino" else -161)
+    return bmr, "mifflin_st_jeor"
+
+def _adaptive_maintenance(pid, formula_maintenance):
+    """Calibra el mantenimiento teórico con datos REALES del usuario cuando
+    hay suficiente historial: compara el cambio de peso real contra las
+    calorías realmente registradas en ese periodo (balance energético:
+    1 kg de tejido ≈ 7700 kcal) y mezcla ese mantenimiento observado con el
+    de la fórmula. Esto es lo que hace que la meta se vuelva más precisa
+    con el tiempo, en vez de depender solo de una ecuación genérica.
+    Devuelve (maintenance_calibrado, se_uso_datos_reales, dias_de_datos)."""
+    try:
+        con = db()
+        wl = con.execute(
+            "SELECT log_date, weight_kg FROM weight_logs WHERE profile_id=? ORDER BY log_date ASC",
+            (pid,)
+        ).fetchall()
+        if len(wl) < 2:
+            con.close()
+            return formula_maintenance, False, 0
+        d0 = date.fromisoformat(wl[0]["log_date"]); d1 = date.fromisoformat(wl[-1]["log_date"])
+        days = (d1 - d0).days
+        if days < 10:
+            con.close()
+            return formula_maintenance, False, days
+        rows = con.execute(
+            "SELECT meal_date, SUM(kcal) k FROM meal_diary WHERE profile_id=? AND meal_date BETWEEN ? AND ? GROUP BY meal_date",
+            (pid, wl[0]["log_date"], wl[-1]["log_date"])
+        ).fetchall()
+        con.close()
+        logged_days = [r for r in rows if num(r["k"]) > 200]  # ignora días casi sin registrar
+        # Se exige haber registrado comidas en al menos el 60% de los días
+        # del periodo para confiar en el promedio de ingesta.
+        if len(logged_days) < max(7, days*0.6):
+            return formula_maintenance, False, days
+        avg_intake = sum(num(r["k"]) for r in logged_days) / len(logged_days)
+        weight_change = num(wl[-1]["weight_kg"]) - num(wl[0]["weight_kg"])
+        daily_balance = (weight_change * 7700.0) / days   # kcal/día que sobraron o faltaron
+        observed_maintenance = avg_intake - daily_balance
+        # Se ignoran lecturas fisiológicamente absurdas (ruido de datos).
+        if observed_maintenance < 800 or observed_maintenance > 6000:
+            return formula_maintenance, False, days
+        # Mezcla: más peso a lo observado cuantos más días de buen registro haya,
+        # con un techo del 70% para no sobre-ajustar a periodos cortos o ruidosos.
+        weight_observed = min(0.70, 0.20 + 0.01*len(logged_days))
+        calibrated = observed_maintenance*weight_observed + formula_maintenance*(1-weight_observed)
+        return calibrated, True, days
+    except Exception:
+        return formula_maintenance, False, 0
+
+def _macro_targets(w, target, goal, body_fat_pct=None):
+    """Reparto de macros más fisiológico:
+    - Proteína: por kg de masa magra si se conoce % grasa (más exacto para
+      personas con mucha grasa corporal, donde g/kg de peso total sobreestima),
+      si no, por kg de peso total, con rangos por objetivo basados en evidencia
+      de nutrición deportiva (1.6-2.2 g/kg en déficit/ganancia muscular).
+    - Grasa: nunca por debajo de 0.6 g/kg NI del 20% de las calorías totales
+      (piso hormonal mínimo recomendado).
+    - Carbohidratos: el resto de las calorías."""
+    lean_kg = w*(1-body_fat_pct/100.0) if body_fat_pct and 5<=body_fat_pct<=60 else None
+    base = lean_kg if lean_kg else w
+    if goal == "Perder peso":
+        protein = base * (2.2 if lean_kg else 1.8)
+    elif goal == "Ganar masa muscular":
+        protein = base * (2.0 if lean_kg else 1.8)
+    elif goal == "Ganar peso":
+        protein = base * (1.6 if lean_kg else 1.4)
+    else:
+        protein = base * (1.4 if lean_kg else 1.2)
+    fat = max(w*0.6, target*0.20/9)
+    protein_kcal = protein*4; fat_kcal = fat*9
+    carbs = max(0.0, (target - protein_kcal - fat_kcal)/4)
+    return round(protein), round(carbs), round(fat)
+
+def _energy_core(sex, age, h, w, activity, goal, body_fat_pct=None, pid=None):
+    """Motor único de cálculo de energía: lo usan tanto energy_estimate()
+    (perfil ya guardado, puede calibrarse con historial real) como
+    calculate_targets() (onboarding/edición, sin historial todavía)."""
+    bmr, method = _bmr_estimate(sex, age, h, w, body_fat_pct)
+    maintenance = bmr * ACTIVITY_FACTORS.get(activity, 1.375)
+    adaptive_used, adaptive_days = False, 0
+    if pid:
+        maintenance, adaptive_used, adaptive_days = _adaptive_maintenance(pid, maintenance)
+    # Déficit/superávit proporcional al mantenimiento (en vez de un número fijo
+    # de kcal) para que la meta escale de forma correcta tanto para una
+    # persona de 50 kg como para una de 110 kg. Se limita a un rango seguro.
+    if goal == "Perder peso":
+        low, high = maintenance*0.78, maintenance*0.85   # déficit ~15-22%
+    elif goal in ("Ganar peso", "Ganar masa muscular"):
+        low, high = maintenance*1.08, maintenance*1.15   # superávit ~8-15%
+    else:
+        low, high = maintenance*0.95, maintenance*1.05
+    floor = 1500 if sex == "Masculino" else 1200
+    low = max(floor, low); high = max(low, high)
+    target = (low+high)/2
+    protein, carbs, fat = _macro_targets(w, target, goal, body_fat_pct)
+    return {
+        "bmr": round(bmr), "method": method, "maintenance": round(maintenance),
+        "target_low": round(low), "target_high": round(high), "target": round(target),
+        "protein_target": protein, "carbs_target": carbs, "fat_target": fat,
+        "adaptive_used": adaptive_used, "adaptive_days": adaptive_days,
+    }
+
 def energy_estimate(p):
     """Estimate daily energy and always expose stored onboarding targets to the dashboard."""
     if not p:
@@ -1062,6 +1228,7 @@ def energy_estimate(p):
                 "target":stored_target,"protein_target":stored_protein,"carbs_target":stored_carbs,"fat_target":stored_fat}
     sex=p.get("sex_energy")
     w=float(p.get("weight_kg") or 0); h=float(p.get("height_cm") or 0)
+    body_fat=num(p.get("body_fat_pct")) or None
     if sex not in ("Masculino","Femenino") or not h or not w or not age:
         if stored_target > 0:
             return {"enabled":True,"maintenance":0,"target_low":stored_target,"target_high":stored_target,
@@ -1070,22 +1237,19 @@ def energy_estimate(p):
                     "estimated":True,"reason":"Referencia basada en los datos registrados; falta una variable fisiológica para calcular el mantenimiento con Mifflin-St Jeor."}
         return {"enabled":False,"reason":"Selecciona la variable fisiológica usada por la ecuación para estimar energía.",
                 "target":0,"protein_target":0,"carbs_target":0,"fat_target":0}
-    bmr=10*w+6.25*h-5*age+(5 if sex=="Masculino" else -161)
-    maintenance=bmr*ACTIVITY_FACTORS.get(p.get("activity"),1.375)
     goal=p.get("goal")
-    if goal=="Perder peso": low,high=maintenance-400,maintenance-250
-    elif goal in ("Ganar peso","Ganar masa muscular"): low,high=maintenance+150,maintenance+300
-    else: low,high=maintenance-100,maintenance+100
-    low=max(1200,low); high=max(low,high)
-    target=stored_target if stored_target>0 else (low+high)/2
+    core=_energy_core(sex,age,h,w,p.get("activity"),goal,body_fat,pid=p.get("id"))
+    target=stored_target if stored_target>0 else core["target"]
     bmi=w/((h/100)**2)
-    protein=stored_protein if stored_protein>0 else (w*1.6 if goal in ("Perder peso","Ganar masa muscular") else w*1.2)
-    fat=stored_fat if stored_fat>0 else (target*0.28/9)
-    carbs=stored_carbs if stored_carbs>0 else max(0,(target-protein*4-fat*9)/4)
-    return {"enabled":True,"maintenance":round(maintenance),"target_low":round(low),"target_high":round(high),
+    protein=stored_protein if stored_protein>0 else core["protein_target"]
+    fat=stored_fat if stored_fat>0 else core["fat_target"]
+    carbs=stored_carbs if stored_carbs>0 else core["carbs_target"]
+    return {"enabled":True,"maintenance":core["maintenance"],"target_low":core["target_low"],"target_high":core["target_high"],
             "target":round(target),"bmi":round(bmi,1),"protein_target":round(protein),"carbs_target":round(carbs),
-            "fat_target":round(fat),"estimated":stored_target<=0}
-def calculate_targets(sex, age, height_cm, weight_kg, activity, goal):
+            "fat_target":round(fat),"estimated":stored_target<=0,
+            "method":core["method"],"adaptive_used":core["adaptive_used"],"adaptive_days":core["adaptive_days"]}
+
+def calculate_targets(sex, age, height_cm, weight_kg, activity, goal, body_fat_pct=None, pid=None):
     """Estimate daily energy and macro targets using the same logic as energy_estimate()."""
     age=int(age); h=float(height_cm); w=float(weight_kg)
     if age < 18 or sex not in ("Masculino", "Femenino") or not h or not w:
@@ -1095,20 +1259,8 @@ def calculate_targets(sex, age, height_cm, weight_kg, activity, goal):
         fat=round(target * 0.28 / 9)
         carbs=max(0, round((target - protein*4 - fat*9) / 4))
         return target, protein, carbs, fat
-    bmr=10*w + 6.25*h - 5*age + (5 if sex=="Masculino" else -161)
-    maintenance=bmr*ACTIVITY_FACTORS.get(activity,1.375)
-    if goal=="Perder peso":
-        low,high=maintenance-400,maintenance-250
-    elif goal in ("Ganar peso","Ganar masa muscular"):
-        low,high=maintenance+150,maintenance+300
-    else:
-        low,high=maintenance-100,maintenance+100
-    low=max(1200,low); high=max(low,high)
-    target=round((low+high)/2)
-    protein=round(w*(1.6 if goal in ("Perder peso","Ganar masa muscular") else 1.2))
-    fat=round(target*0.28/9)
-    carbs=max(0,round((target-protein*4-fat*9)/4))
-    return target, protein, carbs, fat
+    core=_energy_core(sex,age,h,w,activity,goal,body_fat_pct,pid=pid)
+    return core["target"], core["protein_target"], core["carbs_target"], core["fat_target"]
 
 def ensure_profile_targets(pid):
     """Backfill old profiles so the dashboard never renders 0/0 references."""
@@ -1118,7 +1270,7 @@ def ensure_profile_targets(pid):
     needs=any(num(p.get(k))<=0 for k in ("calorie_target","protein_target","carbs_target","fat_target"))
     if needs:
         try:
-            kcal,prot,carbs,fat=calculate_targets(p.get("sex_energy"),int(p.get("age") or 0),float(p.get("height_cm") or 0),float(p.get("weight_kg") or 0),p.get("activity"),p.get("goal"))
+            kcal,prot,carbs,fat=calculate_targets(p.get("sex_energy"),int(p.get("age") or 0),float(p.get("height_cm") or 0),float(p.get("weight_kg") or 0),p.get("activity"),p.get("goal"),num(p.get("body_fat_pct")) or None,pid)
         except Exception:
             # Ultra fallback: nunca dejar el panel en 0/0 aunque falten datos del perfil.
             w=num(p.get("weight_kg")) or 60
@@ -2115,7 +2267,7 @@ def onboarding():
         "name":"", "age":30, "sex":"Prefiero no indicar", "height":170.0, "weight":70.0,
         "activity":list(ACTIVITY_FACTORS)[1], "goal":"Mantener", "diet":"Omnívora",
         "allergies":"", "intolerances":"", "avoid":"", "favorites":"", "special":"Ninguna",
-        "water_goal":2200, "calorie_target":0, "protein_target":0, "pin":"", "region":"Piura"
+        "water_goal":2200, "calorie_target":0, "protein_target":0, "pin":"", "region":"Piura", "body_fat_pct":0.0
     }
     ob = st.session_state.setdefault("onboarding", defaults.copy())
     st.session_state.setdefault("onboarding_step", 0)
@@ -2179,6 +2331,10 @@ def onboarding():
                 ob["weight"] = st.number_input("Peso (kg)", 30.0, 250.0, float(ob["weight"]), 0.1)
             regions=list(dict.fromkeys(list(REGIONAL_FACTS.keys())+["Amazonas","Áncash","Apurímac","Arequipa","Ayacucho","Cajamarca","Callao","Huancavelica","Pasco","San Martín","Tumbes","Ucayali"]))
             ob["region"]=st.selectbox("¿De qué parte del Perú eres?",regions,index=regions.index(ob.get("region","Piura")) if ob.get("region","Piura") in regions else 0)
+            ob["body_fat_pct"] = st.number_input(
+                "% de grasa corporal (opcional)", 0.0, 60.0, float(ob.get("body_fat_pct",0) or 0), 0.5,
+                help="Si lo conoces (báscula de bioimpedancia, caliper, DEXA), FitGlass calculará tu gasto calórico con la fórmula Katch-McArdle, más precisa que la genérica. Déjalo en 0 si no lo sabes."
+            )
 
         elif step == 2:
             activity_options = list(ACTIVITY_FACTORS)
@@ -2241,7 +2397,7 @@ def onboarding():
             if ob["pin"] and not re.fullmatch(r"\d{4}", ob["pin"]):
                 st.error("El PIN debe tener exactamente 4 dígitos.")
                 return
-            kcal, prot, carbs, fat = calculate_targets(ob["sex"], int(ob["age"]), float(ob["height"]), float(ob["weight"]), ob["activity"], ob["goal"])
+            kcal, prot, carbs, fat = calculate_targets(ob["sex"], int(ob["age"]), float(ob["height"]), float(ob["weight"]), ob["activity"], ob["goal"], num(ob.get("body_fat_pct")) or None)
             if ob["calorie_target"] <= 0:
                 ob["calorie_target"] = kcal
             if ob["protein_target"] <= 0:
@@ -2255,7 +2411,8 @@ def onboarding():
                 "avoid_foods":ob["avoid"], "allergies":ob["allergies"], "special_state":ob["special"],
                 "photo_path":"", "pin_hash":hash_pin(ob["pin"]) if ob["pin"] else "", "water_goal_ml":int(ob["water_goal"]),
                 "diet_style":ob["diet"], "intolerances":ob["intolerances"], "region":ob.get("region","Piura"), "notes":"", "reminders_enabled":1, "calorie_target":float(ob["calorie_target"]),
-                "protein_target":float(ob["protein_target"]), "carbs_target":float(carbs), "fat_target":float(fat)
+                "protein_target":float(ob["protein_target"]), "carbs_target":float(carbs), "fat_target":float(fat),
+                "body_fat_pct":float(num(ob.get("body_fat_pct")))
             }
             pid=create_profile(payload)
             add_points(pid,20,"Perfil creado")
@@ -2682,14 +2839,22 @@ elif page==" Mi perfil":
                     special=st.selectbox("Estado especial",sp,index=sp.index(profile.get("special_state","Ninguno")))
                     diet=st.selectbox("Patrón alimentario",["Omnívora","Vegetariana","Vegana","Pescetariana","Baja en carbohidratos","Otra"],index=["Omnívora","Vegetariana","Vegana","Pescetariana","Baja en carbohidratos","Otra"].index(profile.get("diet_style","Omnívora")) if profile.get("diet_style","Omnívora") in ["Omnívora","Vegetariana","Vegana","Pescetariana","Baja en carbohidratos","Otra"] else 0)
                     intolerances=st.text_area("Intolerancias",profile.get("intolerances",""))
+                    body_fat=st.number_input("% de grasa corporal (opcional)",0.0,60.0,float(num(profile.get("body_fat_pct")) or 0),0.5,
+                        help="Si lo conoces, FitGlass usará Katch-McArdle (más preciso, basado en tu masa magra) en vez de la fórmula genérica.")
+                    recalc=st.checkbox("Recalcular mis calorías y macros automáticamente con estos datos",value=False,
+                        help="Si lo marcas, tu meta calórica y de macros se recalculará ahora mismo con tu peso/talla/actividad/objetivo/% grasa actuales (y con tu historial real de peso y comidas, si ya tienes suficiente registrado).")
                 save=st.form_submit_button("Guardar cambios",type="primary",use_container_width=True)
             if save:
                 pp=profile.get("photo_path","")
                 if photo:pp=save_jpeg(photo.getvalue(),PROFILE_DIR,f"profile_{profile['id']}",700)
+                if recalc:
+                    kcal2,prot2,carbs2,fat2=calculate_targets(sex,int(age),float(height),float(weight),activity,goal,body_fat or None,profile["id"])
+                else:
+                    kcal2,prot2,carbs2,fat2=float(profile.get("calorie_target") or 0),float(profile.get("protein_target") or 0),float(profile.get("carbs_target") or 0),float(profile.get("fat_target") or 0)
                 update_profile(profile["id"],{"name":name,"age":int(age),"sex_energy":sex,"height_cm":height,"weight_kg":weight,
                     "activity":activity,"goal":goal,"favorite_foods":fav,"favorite_fruits":fr,"favorite_vegetables":veg,
-                    "avoid_foods":avoid,"allergies":allerg,"special_state":special,"photo_path":pp,"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"region":region,"notes":profile.get("notes",""),"reminders_enabled":int(profile.get("reminders_enabled",1) or 0),"calorie_target":float(profile.get("calorie_target") or 0),"protein_target":float(profile.get("protein_target") or 0),"carbs_target":float(profile.get("carbs_target") or 0),"fat_target":float(profile.get("fat_target") or 0)})
-                st.success("Guardado.");st.rerun()
+                    "avoid_foods":avoid,"allergies":allerg,"special_state":special,"photo_path":pp,"water_goal_ml":int(water_goal),"diet_style":diet,"intolerances":intolerances,"region":region,"notes":profile.get("notes",""),"reminders_enabled":int(profile.get("reminders_enabled",1) or 0),"calorie_target":kcal2,"protein_target":prot2,"carbs_target":carbs2,"fat_target":fat2,"body_fat_pct":float(body_fat)})
+                st.success("Guardado."+(" Metas recalculadas." if recalc else ""));st.rerun()
             st.markdown("---")
             with st.expander("Eliminar este perfil (irreversible)"):
                 st.warning("Esto borra el perfil y todo su historial de forma permanente.")
